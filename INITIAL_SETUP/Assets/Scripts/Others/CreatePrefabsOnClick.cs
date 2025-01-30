@@ -5,6 +5,7 @@ using Unity.Transforms;
 using Unity.Rendering;
 using Unity.Collections;
 using UnityEngine.UI;
+using System.Collections;
 using System.Collections.Generic;
 
 public class CreatePrefabsOnClick : MonoBehaviour
@@ -59,9 +60,7 @@ public class CreatePrefabsOnClick : MonoBehaviour
                 }
                 else
                 {
-                    Debug.Log("Todos los prefabs han sido colocados.");
-                    messageText.text = "Todos los prefabs han sido colocados.";
-                    isWaitingForClick = false;
+                    OnAllPrefabsPlaced();
                 }
             }
         }
@@ -94,14 +93,17 @@ public class CreatePrefabsOnClick : MonoBehaviour
         float randomYRotation = UnityEngine.Random.Range(0f, 360f);
         quaternion newRotation = math.mul(originalRotation, quaternion.RotateY(math.radians(randomYRotation)));
 
+        float heightOffset = originalScale.y * 0.5f;
+        float3 adjustedPosition = new float3(position.x, math.max(position.y + heightOffset, heightOffset), position.z);
+
         entityManager.SetComponentData(entity, new LocalTransform
         {
-            Position = position,
+            Position = adjustedPosition,
             Rotation = newRotation,
             Scale = originalScale.x
         });
 
-        Debug.Log("Entidad " + prefabs[currentPrefabIndex].name + " creada en " + position);
+        Debug.Log("Entidad " + prefabs[currentPrefabIndex].name + " creada en " + adjustedPosition);
     }
 
     private void SolicitarColocacion()
@@ -110,8 +112,23 @@ public class CreatePrefabsOnClick : MonoBehaviour
             return;
 
         string prefabName = prefabs[currentPrefabIndex].name;
-        messageText.text = "Por favor, ahora clickee donde quiere colocar el " + prefabName + ".";
+        messageText.text = "Por favor, ahora clickee donde quiere colocar el organismo '" + prefabName + "'.";
         isWaitingForClick = true;
+    }
+
+    private void OnAllPrefabsPlaced()
+    {
+        Debug.Log("Todos los prefabs han sido colocados.");
+        messageText.text = "Todos los prefabs han sido colocados.";
+        isWaitingForClick = false;
+        StartCoroutine(ShowFinalMessageAndCompleteSetup());
+    }
+
+    private IEnumerator ShowFinalMessageAndCompleteSetup()
+    {
+        yield return new WaitForSeconds(3f);
+        messageCanvas.SetActive(false);
+        GameStateManager.CompleteSetup();
     }
 
     private void CrearMensajeUI()
@@ -129,10 +146,11 @@ public class CreatePrefabsOnClick : MonoBehaviour
         messageText.alignment = TextAnchor.MiddleCenter;
         messageText.fontSize = 16;
         messageText.color = Color.black;
+        messageText.fontStyle = FontStyle.BoldAndItalic;
 
         RectTransform textTransform = messageText.GetComponent<RectTransform>();
         textTransform.sizeDelta = new Vector2(1000, 100);
-        textTransform.anchoredPosition = new Vector2(0, 150);
+        textTransform.anchoredPosition = new Vector2(0, 200);
         messageCanvas.SetActive(true);
     }
 }
