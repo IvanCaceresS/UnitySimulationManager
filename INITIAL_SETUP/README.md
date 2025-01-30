@@ -1,8 +1,8 @@
 # SETUP INICIAL
 
-![alt text](image.png)
-![alt text](image-1.png)
-![alt text](image-2.png)
+![alt text](image.png) CAMARA
+![alt text](image-1.png) GameObject
+![alt text](image-2.png) PlaceFirstEntities
 
 [LISTO] DEBE PERMITIR SELECCIONAR EN EL "MAPA" DONDE SE QUIEREN COLOCAR LA PRIMERA CELULA DE CADA TIPO, DEBE SER ESCALABLE A N TIPO DE CELULAS
 

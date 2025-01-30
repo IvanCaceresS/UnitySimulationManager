@@ -44,6 +44,7 @@ public class GameStyleCamera : MonoBehaviour
     private void EnableMovement()
     {
         canMove = true;
+        Debug.Log("GameStyleCamera: Activando movimiento de cámara.");
     }
 
     void Update()
@@ -53,6 +54,7 @@ public class GameStyleCamera : MonoBehaviour
         if (Input.GetKeyDown(KeyCode.C)) 
         {
             ToggleCameraMode();
+            Debug.Log("GameStyleCamera: Cambiando modo de cámara.");
         }
 
         if (!isTopDownView)

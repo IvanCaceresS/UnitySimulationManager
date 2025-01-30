@@ -11,7 +11,7 @@ class PrefabSpawnerBaker : Baker<PrefabSpawnerAuthoring>
         GameObject[] loadedPrefabs = Resources.LoadAll<GameObject>("Prefabs");
         if (loadedPrefabs.Length == 0)
         {
-            Debug.LogError("PrefabSpawnerBaker: No se encontraron prefabs en Resources/Prefabs.");
+            Debug.LogError("PrefabSpawnerAuthoring: No se encontraron prefabs en Resources/Prefabs.");
             return;
         }
         
@@ -23,7 +23,7 @@ class PrefabSpawnerBaker : Baker<PrefabSpawnerAuthoring>
                 prefab = GetEntity(prefab, TransformUsageFlags.Dynamic)
             });
             // No se puede usar SetName directamente en Baker. Unity no lo permite en este contexto.
-            Debug.Log("Entidad creada para " + prefab.name);
+            Debug.Log("PrefabSpawnerAuthoring: Entidad creada para " + prefab.name);
         }
     }
 }

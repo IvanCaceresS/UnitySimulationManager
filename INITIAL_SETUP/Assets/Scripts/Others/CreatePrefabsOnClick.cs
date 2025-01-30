@@ -24,7 +24,7 @@ public class CreatePrefabsOnClick : MonoBehaviour
         mainCamera = Camera.main;
         if (mainCamera == null)
         {
-            Debug.LogError("No se encontró una cámara principal en la escena.");
+            Debug.LogError("CreatePrefabsOnClick: No se encontró una cámara principal en la escena.");
             return;
         }
 
@@ -34,13 +34,16 @@ public class CreatePrefabsOnClick : MonoBehaviour
 
         if (prefabs.Count == 0)
         {
-            Debug.LogError("No se encontraron prefabs en Resources/Prefabs.");
+            Debug.LogError("CreatePrefabsOnClick: No se encontraron prefabs en Resources/Prefabs.");
             return;
         }
 
-        Debug.Log("Se encontraron " + prefabs.Count + " prefabs.");
+        Debug.Log("CreatePrefabsOnClick: Se encontraron " + prefabs.Count + " prefabs.");
+        
+        // Este query busca las entidades que tienen el componente PrefabEntityComponent
+        // para luego instanciar entidades a partir de dichos prefabs.
         spawnerQuery = entityManager.CreateEntityQuery(typeof(PrefabEntityComponent));
-
+        
         SolicitarColocacion();
     }
 
@@ -79,7 +82,8 @@ public class CreatePrefabsOnClick : MonoBehaviour
         NativeArray<Entity> spawnerEntities = spawnerQuery.ToEntityArray(Allocator.Temp);
         if (currentPrefabIndex >= spawnerEntities.Length)
         {
-            Debug.LogError("No se encontró un spawner correspondiente al prefab en el índice " + currentPrefabIndex);
+            Debug.LogError("CreatePrefabsOnClick: No se encontró un spawner correspondiente al prefab en el índice " + currentPrefabIndex);
+            spawnerEntities.Dispose();
             return;
         }
 
@@ -103,7 +107,7 @@ public class CreatePrefabsOnClick : MonoBehaviour
             Scale = originalScale.x
         });
 
-        Debug.Log("Entidad " + prefabs[currentPrefabIndex].name + " creada en " + adjustedPosition);
+        Debug.Log("CreatePrefabsOnClick: Entidad " + prefabs[currentPrefabIndex].name + " creada en " + adjustedPosition);
     }
 
     private void SolicitarColocacion()
@@ -112,13 +116,13 @@ public class CreatePrefabsOnClick : MonoBehaviour
             return;
 
         string prefabName = prefabs[currentPrefabIndex].name;
-        messageText.text = "Por favor, ahora clickee donde quiere colocar el organismo '" + prefabName + "'.";
+        messageText.text = "Por favor, clickee donde quiere colocar el organismo '" + prefabName + "'.";
         isWaitingForClick = true;
     }
 
     private void OnAllPrefabsPlaced()
     {
-        Debug.Log("Todos los prefabs han sido colocados.");
+        Debug.Log("CreatePrefabsOnClick: Todos los prefabs han sido colocados.");
         messageText.text = "Todos los prefabs han sido colocados.";
         isWaitingForClick = false;
         StartCoroutine(ShowFinalMessageAndCompleteSetup());
@@ -126,7 +130,7 @@ public class CreatePrefabsOnClick : MonoBehaviour
 
     private IEnumerator ShowFinalMessageAndCompleteSetup()
     {
-        yield return new WaitForSeconds(3f);
+        yield return new WaitForSeconds(0.5f);
         messageCanvas.SetActive(false);
         GameStateManager.CompleteSetup();
     }
@@ -153,4 +157,36 @@ public class CreatePrefabsOnClick : MonoBehaviour
         textTransform.anchoredPosition = new Vector2(0, 200);
         messageCanvas.SetActive(true);
     }
+
+    /// <summary>
+    /// Método para resetear la simulación: eliminar todas las entidades existentes
+    /// y volver a dejar el sistema listo para crear nuevos prefabs.
+    /// </summary>
+    public void ResetSimulation()
+    {
+        // 1) Query: Entidades de SubScene que NO tengan PrefabEntityComponent
+        var queryDesc = new EntityQueryDesc
+        {
+            All = new[] { ComponentType.ReadOnly<SceneSection>() }, // todas las de la subescena
+            None = new[] { ComponentType.ReadOnly<PrefabEntityComponent>() } // pero sin spawners
+        };
+
+        var subsceneQuery = entityManager.CreateEntityQuery(queryDesc);
+        var toDestroy = subsceneQuery.ToEntityArray(Allocator.Temp);
+
+        // 2) Destruir únicamente esas entidades
+        entityManager.DestroyEntity(toDestroy);
+        toDestroy.Dispose();
+        
+        Debug.Log("CreatePrefabsOnClick: Se han eliminado todas las entidades de la subescena, excepto los spawners.");
+
+        // 3) Resetear nuestro estado interno
+        currentPrefabIndex = 0;
+        isWaitingForClick = false;
+        messageCanvas.SetActive(true);
+
+        // 4) Volver a solicitar la colocación desde cero
+        SolicitarColocacion();
+    }
+
 }
