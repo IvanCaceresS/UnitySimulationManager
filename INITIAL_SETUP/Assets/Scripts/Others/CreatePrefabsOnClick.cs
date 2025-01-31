@@ -107,6 +107,24 @@ public class CreatePrefabsOnClick : MonoBehaviour
             Scale = originalScale.x
         });
 
+        // 🔹 ASIGNAR COMPONENTE SEGÚN EL PREFAB 🔹
+        string prefabName = prefabs[currentPrefabIndex].name;
+        switch (prefabName)
+        {
+            case "Cube":
+                entityManager.AddComponentData(entity, new CubeComponent());
+                break;
+            case "EColi":
+                entityManager.AddComponentData(entity, new EColiComponent());
+                break;
+            case "SCerevisiae":
+                entityManager.AddComponentData(entity, new SCerevisiaeComponent());
+                break;
+            default:
+                Debug.LogWarning($"CreatePrefabsOnClick: No hay un componente ECS definido para el prefab '{prefabName}'");
+                break;
+        }
+
         Debug.Log("CreatePrefabsOnClick: Entidad " + prefabs[currentPrefabIndex].name + " creada en " + adjustedPosition);
     }
 
