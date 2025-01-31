@@ -105,7 +105,9 @@ public class Right_GUI : MonoBehaviour
         {
             GameStateManager.SetDeltaTime(deltaTime);
             showDeltaTimeWindow = false;
-            TogglePause();
+            isPaused = false;
+            Time.timeScale = 1;
+            GameStateManager.SetPauseState(isPaused);
 
             // Llamamos a Left_GUI para iniciar la simulación
             Left_GUI leftGUI = FindFirstObjectByType<Left_GUI>();

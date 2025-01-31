@@ -22,7 +22,7 @@ public partial struct SCerevisiaeSystem : ISystem
 
         foreach (var transform in SystemAPI.Query<RefRW<LocalTransform>>().WithAll<SCerevisiaeComponent>())
         {
-            float scaleFactor = math.sin(time) * 0.5f + 1.5f;
+            float scaleFactor = math.sin(time) * 2.0f + 3.0f;
             transform.ValueRW.Scale = scaleFactor;
         }
     }

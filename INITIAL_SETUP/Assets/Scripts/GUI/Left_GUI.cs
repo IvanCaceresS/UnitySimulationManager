@@ -1,14 +1,20 @@
 using UnityEngine;
 using System;
+using System.Collections.Generic;
+using Unity.Entities;
+using System.Reflection;
 
 public class Left_GUI : MonoBehaviour
 {
     private readonly Rect sliderRect = new Rect(30, 30, 300, 30);
+    private float simulationStartTime;
     private float cachedRealTime;
     private float cachedSimulatedTime;
     private float cachedFPS;
     private int cachedFrameCount;
     private bool hasStartedSimulation = false; // Solo inicia cuando se presione "Start Simulation"
+
+    private Dictionary<string, int> entityCounts = new Dictionary<string, int>();
 
     void Start()
     {
@@ -33,21 +39,16 @@ public class Left_GUI : MonoBehaviour
         if (hasStartedSimulation && !GameStateManager.IsPaused)
         {
             CacheValues();
+            UpdateEntityCounts(); // Actualizar conteo de entidades en cada frame
         }
     }
 
-    /// <summary>
-    /// Método llamado desde Right_GUI cuando el usuario presiona "Start Simulation".
-    /// </summary>
     public void StartSimulation()
     {
         hasStartedSimulation = true;
         ResetCachedValues(); // Reinicia los valores al comenzar la simulación
     }
 
-    /// <summary>
-    /// Método llamado desde Right_GUI cuando el usuario presiona "Reiniciar".
-    /// </summary>
     public void ResetSimulation()
     {
         hasStartedSimulation = false;
@@ -56,18 +57,51 @@ public class Left_GUI : MonoBehaviour
 
     private void ResetCachedValues()
     {
+        // Registro la hora real actual como el "nuevo inicio"
+        simulationStartTime = Time.time;
         cachedRealTime = 0f;
         cachedSimulatedTime = 0f;
         cachedFPS = 0f;
         cachedFrameCount = 0;
+        entityCounts.Clear(); // Reiniciar conteo de entidades
     }
 
     private void CacheValues()
     {
-        cachedRealTime = Time.time;
-        cachedSimulatedTime = Time.time * GameStateManager.DeltaTime * 1f / Time.deltaTime;
+        // Aumenta el conteo de frames
+        cachedFrameCount++;
+
+        // Tiempo real transcurrido desde que se reseteó/inició
+        cachedRealTime = Time.time - simulationStartTime;
+
+        // Calculamos FPS en tiempo real
         cachedFPS = 1f / Time.deltaTime;
-        cachedFrameCount += 1;
+
+        // Tiempo simulado deseado:
+        // "cada_frame_pasado * 1segundo * GameStateManager.DeltaTime"
+        cachedSimulatedTime = cachedFrameCount * (1f * GameStateManager.DeltaTime);
+    }
+
+
+    private void UpdateEntityCounts()
+    {
+        entityCounts.Clear();
+        var entityManager = World.DefaultGameObjectInjectionWorld.EntityManager;
+        int totalEntities = 0;
+
+        // Buscar todos los tipos de componentes que terminan en "Component" (excepto PrefabEntity)
+        foreach (Type type in Assembly.GetExecutingAssembly().GetTypes())
+        {
+            if (type.IsValueType && typeof(IComponentData).IsAssignableFrom(type) && type.Name.EndsWith("Component") && type.Name != "PrefabEntityComponent" && type.Name != "PlaneComponent")
+            {
+                int count = entityManager.CreateEntityQuery(ComponentType.ReadOnly(type)).CalculateEntityCount();
+                entityCounts[type.Name.Replace("Component", "")] = count;
+                totalEntities += count;
+            }
+        }
+
+        // Agregar el total al final
+        entityCounts["Total"] = totalEntities;
     }
 
     void OnGUI()
@@ -94,6 +128,14 @@ public class Left_GUI : MonoBehaviour
         GUI.Label(new Rect(sliderRect.x, sliderRect.y + 150, 300, 25), $"Escala de Tiempo: {GameStateManager.DeltaTime:F2}.", labelStyle);
         GUI.Label(new Rect(sliderRect.x, sliderRect.y + 180, 300, 25), $"Frames Transcurridos: {cachedFrameCount}.", labelStyle);
         GUI.Label(new Rect(sliderRect.x, sliderRect.y + 210, 300, 25), $"Pausado: {pauseStatus}.", labelStyle);
+
+        // 🔹 Mostrar la cantidad de cada tipo de entidad (ignorando PrefabEntity)
+        int offsetY = 240;
+        foreach (var entry in entityCounts)
+        {
+            GUI.Label(new Rect(sliderRect.x, sliderRect.y + offsetY, 300, 25), $"{entry.Key}: {entry.Value}", labelStyle);
+            offsetY += 30;
+        }
     }
 
     private string FormatTime(float timeInSeconds)
