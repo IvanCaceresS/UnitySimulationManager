@@ -77,7 +77,7 @@ public class Right_GUI : MonoBehaviour
     private void ShowDeltaTimeWindow()
     {
         GUI.Box(new Rect(Screen.width / 2 - 150, Screen.height / 2 - 120, 300, 240), "Configuración de Simulación");
-        GUI.Label(new Rect(Screen.width / 2 - 140, Screen.height / 2 - 80, 280, 30), "Ingrese deltaTime (0.01 - 99.99):");
+        GUI.Label(new Rect(Screen.width / 2 - 140, Screen.height / 2 - 80, 280, 30), "Ingrese deltaTime (0.01 - 80.00):");
 
         // Verifica si el usuario dejó el campo vacío
         if (string.IsNullOrWhiteSpace(deltaTimeInput))
@@ -95,10 +95,10 @@ public class Right_GUI : MonoBehaviour
         }
 
         // Clamping para que siempre esté en el rango permitido
-        deltaTime = Mathf.Clamp(deltaTime, 0.01f, 99.99f);
+        deltaTime = Mathf.Clamp(deltaTime, 0.01f, 80.00f);
 
         // Siempre se muestra la barra de desplazamiento, incluso si el usuario no ingresa nada
-        deltaTime = GUI.HorizontalSlider(new Rect(Screen.width / 2 - 140, Screen.height / 2 - 10, 280, 20), deltaTime, 0.01f, 99.99f);
+        deltaTime = GUI.HorizontalSlider(new Rect(Screen.width / 2 - 140, Screen.height / 2 - 10, 280, 20), deltaTime, 0.01f, 80.00f);
         deltaTimeInput = deltaTime.ToString("F2", System.Globalization.CultureInfo.InvariantCulture);
 
         if (GUI.Button(new Rect(Screen.width / 2 - 140, Screen.height / 2 + 50, 280, 30), "Start Simulation"))
@@ -120,9 +120,11 @@ public class Right_GUI : MonoBehaviour
 
     private void RestartSimulation()
     {
+        isPaused = false;
+        Time.timeScale = isPaused ? 0 : 1;
+        GameStateManager.SetPauseState(isPaused);
         // Si NO quieres recargar la escena y solo reiniciar las entidades:
         GameStateManager.ResetGameState();
-
         // Buscamos el script que maneja la creación de entidades
         CreatePrefabsOnClick spawner = FindFirstObjectByType<CreatePrefabsOnClick>();
         if (spawner != null)

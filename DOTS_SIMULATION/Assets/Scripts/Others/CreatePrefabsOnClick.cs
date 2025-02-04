@@ -126,14 +126,13 @@ public class CreatePrefabsOnClick : MonoBehaviour
                 entityManager.AddComponentData(entity, new EColiComponent
                 {
                     // Ajustes de crecimiento
-                    GrowthRate            = 0.05f,
                     MaxScale             = 1.0f,
-                    GrowthTime            = 0f,
-                    GrowthDuration        = 1200f, // 1200 frames => 20 minutos, si frame=1s sim
+                    GrowthTime           = 0f,
+                    GrowthDuration       = 1200f, // 1200 frames => 20 minutos, si frame=1s sim
 
                     // Ajustes de división
                     TimeSinceLastDivision = 0f,
-                    DivisionInterval      = 2400f,
+                    DivisionInterval      = 1200f, // 1200 frames => 20 minutos, si frame=1s sim
 
                     // Estado
                     HasGeneratedChild     = false,
@@ -144,6 +143,7 @@ public class CreatePrefabsOnClick : MonoBehaviour
                     SeparationThreshold   = 0.7f,            // 70%
                 });
                 break;
+
             case "SCerevisiae":
                 entityManager.AddComponentData(entity, new SCerevisiaeComponent());
                 break;
@@ -176,9 +176,9 @@ public class CreatePrefabsOnClick : MonoBehaviour
             case "EColi":
                 collider = Unity.Physics.CapsuleCollider.Create(new CapsuleGeometry
                 {
-                    Vertex0 = new float3(0, -scale * 0.5f, 0),
-                    Vertex1 = new float3(0, scale * 0.5f, 0),
-                    Radius = scale * 0.5f
+                    Vertex0 = new float3(0, -scale * 1.0f, 0),
+                    Vertex1 = new float3(0, scale * 1.0f, 0),
+                    Radius = 0.25f
                 });
                 break;
 
