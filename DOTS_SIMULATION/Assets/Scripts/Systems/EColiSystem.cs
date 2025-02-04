@@ -9,29 +9,31 @@ using UnityEngine;              // Para algunos helpers
 [BurstCompile]
 public partial struct EColiSystem : ISystem
 {
-    // Umbral para actualizar el collider: solo se recrea si la diferencia de escala es mayor que este valor.
+    // Umbral para actualizar el collider (solo se recrea si la diferencia en escala es mayor que este valor)
     const float ColliderUpdateThreshold = 0.01f;
-
+ 
     public void OnCreate(ref SystemState state) { }
     public void OnDestroy(ref SystemState state) { }
     
     public void OnUpdate(ref SystemState state)
     {
-        // Solo se procesa si la simulación está lista y no está pausada.
+        // Solo se procesa si la simulación está lista y no está pausada
         if (!GameStateManager.IsSetupComplete || GameStateManager.IsPaused)
             return;
         
         float simDeltaTime = GameStateManager.DeltaTime;
         var entityManager = state.EntityManager;
-        // Usamos un EntityCommandBuffer que se reproducirá al final del frame.
         var ecb = new EntityCommandBuffer(Unity.Collections.Allocator.Temp);
- 
-        // Iteramos sobre todas las entidades con LocalTransform y EColiComponent.
+        
+        // Itera sobre todas las entidades con LocalTransform y EColiComponent
         foreach (var (transform, ecoli, entity) in SystemAPI
                  .Query<RefRW<LocalTransform>, RefRW<EColiComponent>>()
                  .WithEntityAccess())
         {
-            // Guardamos en variables locales para no llamar repetidamente a ValueRO.
+            // Actualiza GrowthDuration y DivisionInterval en función de TimeReference y SeparationThreshold
+            ecoli.ValueRW.GrowthDuration = ecoli.ValueRO.TimeReference * ecoli.ValueRO.SeparationThreshold;
+            ecoli.ValueRW.DivisionInterval = ecoli.ValueRW.GrowthDuration;
+ 
             float currentScale = transform.ValueRO.Scale;
             float maxScale = ecoli.ValueRO.MaxScale;
             bool isIndependent = (ecoli.ValueRO.Parent == default); // Padre es Entity.Null.
@@ -42,7 +44,7 @@ public partial struct EColiSystem : ISystem
             if (currentScale < maxScale)
             {
                 ecoli.ValueRW.GrowthTime += simDeltaTime;
-                // Si la célula es hija, parte de 0.01; si es inicial, ya nace completa.
+                // Para células hijas se parte de 0.01; para iniciales, ya nacen completas.
                 float initialScale = ecoli.ValueRO.IsInitialCell ? maxScale : 0.01f;
  
                 if (ecoli.ValueRW.GrowthTime <= ecoli.ValueRO.GrowthDuration)
@@ -51,7 +53,7 @@ public partial struct EColiSystem : ISystem
                     float newScale = math.lerp(initialScale, maxScale, t);
                     transform.ValueRW.Scale = newScale;
  
-                    // Actualizamos el collider solo si es independiente y la diferencia supera el umbral.
+                    // Actualiza el collider solo si la célula es independiente y el cambio es significativo.
                     if (isIndependent && hasCollider && math.abs(newScale - currentScale) > ColliderUpdateThreshold)
                     {
                         BlobAssetReference<Unity.Physics.Collider> newCollider =
@@ -65,7 +67,7 @@ public partial struct EColiSystem : ISystem
                     }
                 }
  
-                // Aplica impulso hacia arriba solo si es independiente.
+                // Aplica un impulso hacia arriba solo si la célula es independiente.
                 if (isIndependent && hasVelocity)
                 {
                     var velocity = entityManager.GetComponentData<PhysicsVelocity>(entity);
@@ -83,14 +85,14 @@ public partial struct EColiSystem : ISystem
                 {
                     Entity childEntity = ecb.Instantiate(entity);
                     
-                    // Configura el transform de la hija.
+                    // Configura el transform de la hija: inicia con escala pequeña.
                     var childTransform = transform.ValueRO;
                     childTransform.Scale = 0.01f;
- 
-                    // Fijar la dirección "up" de forma aleatoria (50%: (0,1,0); 50%: (0,-1,0)).
+                    
+                    // Fijar la dirección "up" de la hija de forma aleatoria (50%: (0,1,0); 50%: (0,-1,0)).
                     int separationSign = (UnityEngine.Random.value < 0.5f) ? 1 : -1;
- 
-                    // Configura los datos de la hija (se reinician contadores y se asigna el padre).
+                    
+                    // Configura los datos de la hija, reiniciando GrowthTime y TimeSinceLastDivision, asignando el padre.
                     var childData = ecoli.ValueRW;
                     childData.GrowthTime = 0f;
                     childData.TimeSinceLastDivision = 0f;
@@ -99,13 +101,13 @@ public partial struct EColiSystem : ISystem
                     childData.IsInitialCell = false;
                     childData.SeparationSign = separationSign;
                     ecb.SetComponent(childEntity, childData);
- 
-                    // Posicionar la hija: se usa la dirección aleatoria, que se fija al nacer.
+                    
+                    // Posiciona la hija usando la dirección fija.
                     float3 localUp = new float3(0, separationSign, 0);
                     float3 upDir = math.mul(transform.ValueRO.Rotation, localUp);
                     childTransform.Position = transform.ValueRO.Position + upDir * (transform.ValueRO.Scale * 0.25f);
                     ecb.SetComponent(childEntity, childTransform);
- 
+                    
                     ecoli.ValueRW.TimeSinceLastDivision = 0f;
                 }
             }
@@ -113,29 +115,28 @@ public partial struct EColiSystem : ISystem
             // --- 3) Lógica de anclaje: separación progresiva ---
             if (!ecoli.ValueRO.IsInitialCell && ecoli.ValueRO.Parent != default)
             {
-                // Obtiene el transform del padre.
                 var parentTransform = SystemAPI.GetComponent<LocalTransform>(ecoli.ValueRO.Parent);
                 float childScale = transform.ValueRO.Scale;
-                float threshold = ecoli.ValueRO.SeparationThreshold; // Ej. 0.7 (70%).
- 
+                float threshold = ecoli.ValueRO.SeparationThreshold; // Ej.: 0.7 (70%)
+                
                 if (childScale < threshold * maxScale)
                 {
                     float progress = childScale / maxScale;
                     float offset = math.lerp(0f, parentTransform.Scale * 4.9f, progress);
-                    // Usa la dirección almacenada (fijada al nacer) para no cambiarla durante el crecimiento.
+                    // Usa la dirección almacenada (fijada al nacer) para que no cambie durante el crecimiento.
                     int separationSign = ecoli.ValueRO.SeparationSign;
                     float3 localUp = new float3(0, separationSign, 0);
                     float3 up = math.mul(parentTransform.Rotation, localUp);
- 
+                    
                     transform.ValueRW.Position = parentTransform.Position + up * offset;
                     transform.ValueRW.Rotation = parentTransform.Rotation;
                     ecb.SetComponent(entity, transform.ValueRW);
                 }
                 else
                 {
-                    // Se libera el anclaje.
+                    // Libera el anclaje.
                     ecoli.ValueRW.Parent = default;
- 
+                    
                     if (hasVelocity)
                     {
                         var velocity = entityManager.GetComponentData<PhysicsVelocity>(entity);
@@ -143,8 +144,7 @@ public partial struct EColiSystem : ISystem
                         velocity.Angular = float3.zero;
                         ecb.SetComponent(entity, velocity);
                     }
- 
-                    // Actualiza el collider para que coincida con la escala actual.
+                    
                     if (hasCollider)
                     {
                         BlobAssetReference<Unity.Physics.Collider> newCollider =

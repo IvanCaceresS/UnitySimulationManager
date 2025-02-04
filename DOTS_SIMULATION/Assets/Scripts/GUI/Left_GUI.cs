@@ -6,20 +6,34 @@ using System.Reflection;
 
 public class Left_GUI : MonoBehaviour
 {
-    private readonly Rect sliderRect = new Rect(30, 30, 300, 30);
+    // Parámetros de la interfaz
+    private const int GUIFontSize = 10;
+    private const int GUIWidth = 300;
+    private const int GUIHeight = 30;
+    private const int GUIXPosition = 10;
+    private const int GUIYPosition = 0;
+    private readonly Rect sliderRect = new Rect(GUIXPosition, GUIYPosition, GUIWidth, GUIHeight);
+
+    // Variables de tiempo y FPS
     private float simulationStartTime;
     private float cachedRealTime;
     private float cachedSimulatedTime;
     private float cachedFPS;
     private int cachedFrameCount;
-    private bool hasStartedSimulation = false; // Solo inicia cuando se presione "Start Simulation"
+    private bool hasStartedSimulation = false; // Se activa al presionar "Start Simulation"
 
+    // Conteo de entidades y tipos (cache de reflection)
     private Dictionary<string, int> entityCounts = new Dictionary<string, int>();
+    private List<Type> validComponentTypes = new List<Type>();
+
+    // GUIStyle se inicializará de forma lazy en OnGUI
+    private GUIStyle labelStyle;
 
     void Start()
     {
         GameStateManager.OnSetupComplete += EnableGUI;
-        this.enabled = false; // Se desactiva hasta que el setup esté completo
+        this.enabled = false; // Se activa al completar el setup
+        CacheValidComponentTypes();
     }
 
     void OnDestroy()
@@ -39,73 +53,96 @@ public class Left_GUI : MonoBehaviour
         if (hasStartedSimulation && !GameStateManager.IsPaused)
         {
             CacheValues();
-            UpdateEntityCounts(); // Actualizar conteo de entidades en cada frame
+            UpdateEntityCounts();
         }
     }
 
     public void StartSimulation()
     {
         hasStartedSimulation = true;
-        ResetCachedValues(); // Reinicia los valores al comenzar la simulación
+        ResetCachedValues();
     }
 
     public void ResetSimulation()
     {
         hasStartedSimulation = false;
-        ResetCachedValues(); // Restablece los valores
+        ResetCachedValues();
     }
 
+    /// <summary>
+    /// Reinicia los contadores de tiempo y frames.
+    /// </summary>
     private void ResetCachedValues()
     {
-        // Registro la hora real actual como el "nuevo inicio"
         simulationStartTime = Time.time;
         cachedRealTime = 0f;
         cachedSimulatedTime = 0f;
         cachedFPS = 0f;
         cachedFrameCount = 0;
-        entityCounts.Clear(); // Reiniciar conteo de entidades
+        entityCounts.Clear();
     }
 
+    /// <summary>
+    /// Actualiza los contadores de tiempo, frames y FPS.
+    /// </summary>
     private void CacheValues()
     {
-        // Aumenta el conteo de frames
         cachedFrameCount++;
-
-        // Tiempo real transcurrido desde que se reseteó/inició
         cachedRealTime = Time.time - simulationStartTime;
-
-        // Calculamos FPS en tiempo real
         cachedFPS = 1f / Time.deltaTime;
-
-        // Tiempo simulado deseado:
-        // "cada_frame_pasado * 1segundo * GameStateManager.DeltaTime"
-        cachedSimulatedTime = cachedFrameCount * (1f * GameStateManager.DeltaTime);
+        cachedSimulatedTime = cachedFrameCount * GameStateManager.DeltaTime;
     }
 
-
+    /// <summary>
+    /// Actualiza el conteo de entidades usando la lista cacheada de tipos válidos.
+    /// </summary>
     private void UpdateEntityCounts()
     {
         entityCounts.Clear();
         var entityManager = World.DefaultGameObjectInjectionWorld.EntityManager;
         int totalEntities = 0;
 
-        // Buscar todos los tipos de componentes que terminan en "Component" (excepto PrefabEntity)
+        foreach (Type type in validComponentTypes)
+        {
+            int count = entityManager.CreateEntityQuery(ComponentType.ReadOnly(type)).CalculateEntityCount();
+            string name = type.Name.Replace("Component", "");
+            entityCounts[name] = count;
+            totalEntities += count;
+        }
+        entityCounts["Cantidad de organismos"] = totalEntities;
+    }
+
+    /// <summary>
+    /// Cachea la lista de tipos válidos que implementan IComponentData (filtrados por nombre).
+    /// </summary>
+    private void CacheValidComponentTypes()
+    {
+        validComponentTypes.Clear();
         foreach (Type type in Assembly.GetExecutingAssembly().GetTypes())
         {
-            if (type.IsValueType && typeof(IComponentData).IsAssignableFrom(type) && type.Name.EndsWith("Component") && type.Name != "PrefabEntityComponent" && type.Name != "PlaneComponent")
+            if (type.IsValueType && typeof(IComponentData).IsAssignableFrom(type))
             {
-                int count = entityManager.CreateEntityQuery(ComponentType.ReadOnly(type)).CalculateEntityCount();
-                entityCounts[type.Name.Replace("Component", "")] = count;
-                totalEntities += count;
+                string typeName = type.Name;
+                if (typeName.EndsWith("Component") && typeName != "PrefabEntityComponent" && typeName != "PlaneComponent")
+                {
+                    validComponentTypes.Add(type);
+                }
             }
         }
-
-        // Agregar el total al final
-        entityCounts["Total"] = totalEntities;
     }
 
     void OnGUI()
     {
+        // Inicializa labelStyle de forma lazy.
+        if (labelStyle == null)
+        {
+            labelStyle = new GUIStyle(GUI.skin.label)
+            {
+                fontSize = GUIFontSize,
+                normal = { textColor = Color.black }
+            };
+        }
+
         if (!GameStateManager.IsSetupComplete) return;
 
         DisplaySimulationStats();
@@ -113,28 +150,29 @@ public class Left_GUI : MonoBehaviour
 
     private void DisplaySimulationStats()
     {
-        GUIStyle labelStyle = new GUIStyle(GUI.skin.label)
-        {
-            fontSize = 14,
-            normal = { textColor = Color.white }
-        };
+        int y = GUIYPosition + GUIFontSize;
+        GUI.Label(new Rect(GUIXPosition, y, GUIWidth, GUIHeight), $"FPS: {cachedFPS:F1}.", labelStyle);
+        y += GUIFontSize;
+        GUI.Label(new Rect(GUIXPosition, y, GUIWidth, GUIHeight), $"Tiempo Real: {FormatTime(cachedRealTime)}.", labelStyle);
+        y += GUIFontSize;
+        GUI.Label(new Rect(GUIXPosition, y, GUIWidth, GUIHeight), $"Tiempo Simulado: {FormatTime(cachedSimulatedTime)}.", labelStyle);
+        y += GUIFontSize;
+        GUI.Label(new Rect(GUIXPosition, y, GUIWidth, GUIHeight), $"Tiempo Simulado: {GameStateManager.DeltaTime * cachedFPS:F0} x Tiempo Real.", labelStyle);
+        y += GUIFontSize;
+        GUI.Label(new Rect(GUIXPosition, y, GUIWidth, GUIHeight), $"DeltaTime: {GameStateManager.DeltaTime:F2}.", labelStyle);
+        y += GUIFontSize;
+        GUI.Label(new Rect(GUIXPosition, y, GUIWidth, GUIHeight), $"Frames Transcurridos: {cachedFrameCount}.", labelStyle);
+        y += GUIFontSize;
+        GUI.Label(new Rect(GUIXPosition, y, GUIWidth, GUIHeight), $"Pausado: {(GameStateManager.IsPaused ? "Sí" : "No")}.", labelStyle);
+        y += GUIFontSize;
 
-        string pauseStatus = GameStateManager.IsPaused ? "Sí" : "No";
-
-        GUI.Label(new Rect(sliderRect.x, sliderRect.y + 30, 300, 25), $"FPS: {cachedFPS:F1}.", labelStyle);
-        GUI.Label(new Rect(sliderRect.x, sliderRect.y + 60, 300, 25), $"Tiempo Real: {FormatTime(cachedRealTime)}.", labelStyle);
-        GUI.Label(new Rect(sliderRect.x, sliderRect.y + 90, 300, 25), $"Tiempo Simulado: {FormatTime(cachedSimulatedTime)}.", labelStyle);
-        GUI.Label(new Rect(sliderRect.x, sliderRect.y + 120, 300, 25), $"Tiempo Simulado es: {GameStateManager.DeltaTime * cachedFPS:F1} veces el tiempo Real.", labelStyle);
-        GUI.Label(new Rect(sliderRect.x, sliderRect.y + 150, 300, 25), $"Escala de Tiempo: {GameStateManager.DeltaTime:F2}.", labelStyle);
-        GUI.Label(new Rect(sliderRect.x, sliderRect.y + 180, 300, 25), $"Frames Transcurridos: {cachedFrameCount}.", labelStyle);
-        GUI.Label(new Rect(sliderRect.x, sliderRect.y + 210, 300, 25), $"Pausado: {pauseStatus}.", labelStyle);
-
-        // 🔹 Mostrar la cantidad de cada tipo de entidad (ignorando PrefabEntity)
-        int offsetY = 240;
         foreach (var entry in entityCounts)
         {
-            GUI.Label(new Rect(sliderRect.x, sliderRect.y + offsetY, 300, 25), $"{entry.Key}: {entry.Value}", labelStyle);
-            offsetY += 30;
+            if (entry.Value > 0)
+            {
+                GUI.Label(new Rect(GUIXPosition, y, GUIWidth, GUIHeight), $"{entry.Key}: {entry.Value}.", labelStyle);
+                y += GUIFontSize;
+            }
         }
     }
 
@@ -144,6 +182,6 @@ public class Left_GUI : MonoBehaviour
         int hours = Mathf.FloorToInt((timeInSeconds % 86400f) / 3600f);
         int minutes = Mathf.FloorToInt((timeInSeconds % 3600f) / 60f);
         int seconds = Mathf.FloorToInt(timeInSeconds % 60f);
-        return $"{days:D2}:{hours:D2}:{minutes:D2}:{seconds:D2}";
+        return $"{days:D2} días: {hours:D2} horas: {minutes:D2} minutos: {seconds:D2} segundos";
     }
 }

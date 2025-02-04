@@ -2,43 +2,49 @@ using UnityEngine;
 
 public class GameStyleCamera : MonoBehaviour
 {
-    [Header("Velocidades de Movimiento")]
+    [Header("Movimiento")]
     public float moveSpeed = 20f;
     public float verticalSpeed = 20f;
 
-    [Header("Rotación de la Cámara")]
+    [Header("Rotación")]
     public float rotationSpeed = 200f;
 
-    [Header("Zoom de la Cámara")]
+    [Header("Zoom")]
     public float zoomSpeed = 5f;
     public float minZoom = 5f;
     public float maxZoom = 60f;
 
-    [Header("Restricciones de Posición")]
+    [Header("Restricciones")]
     public float maxDistance = 200f;
     public float minHeight = 0.5f;
 
-    private float currentZoom = 60f;
-    private float pitch = 0f;
-    private float yaw = 0f;
-
+    // Variables internas de cámara
+    private float currentZoom;
+    private float pitch;
+    private float yaw;
     private Vector3 freeCameraPosition;
     private Quaternion freeCameraRotation;
-    private Vector3 topDownPosition = new Vector3(0, 100, 0);
-    private Quaternion topDownRotation = Quaternion.Euler(90, 0, 0);
-
+    private readonly Vector3 topDownPosition = new Vector3(0, 100, 0);
+    private readonly Quaternion topDownRotation = Quaternion.Euler(90, 0, 0);
     private bool isTopDownView = false;
     private bool canMove = false;
-
+    
     void Start()
     {
-        InitializeCamera();
+        currentZoom = maxZoom;
+        pitch = transform.eulerAngles.x;
+        yaw = transform.eulerAngles.y;
+        freeCameraPosition = transform.position;
+        freeCameraRotation = transform.rotation;
+        Camera.main.fieldOfView = currentZoom;
+        Cursor.visible = true;
+        Cursor.lockState = CursorLockMode.None;
         GameStateManager.OnSetupComplete += EnableMovement;
     }
 
     void OnDestroy()
     {
-        GameStateManager.OnSetupComplete -= EnableMovement; // Limpieza para evitar fugas de memoria
+        GameStateManager.OnSetupComplete -= EnableMovement;
     }
 
     private void EnableMovement()
@@ -51,39 +57,25 @@ public class GameStyleCamera : MonoBehaviour
     {
         if (!canMove) return;
 
-        if (Input.GetKeyDown(KeyCode.C)) 
+        if (Input.GetKeyDown(KeyCode.C))
         {
             ToggleCameraMode();
-            Debug.Log("GameStyleCamera: Cambiando modo de cámara.");
         }
 
         if (!isTopDownView)
         {
-            HandleInput();
+            HandleRotation();
+            HandleMovement();
+            HandleZoom();
         }
-    }
-
-    private void InitializeCamera()
-    {
-        Cursor.visible = true;
-        Cursor.lockState = CursorLockMode.None;
-        Camera.main.fieldOfView = currentZoom;
-
-        freeCameraPosition = transform.position;
-        freeCameraRotation = transform.rotation;
-    }
-
-    private void HandleInput()
-    {
-        HandleRotation();
-        HandleMovement();
-        HandleZoom();
     }
 
     private void HandleRotation()
     {
+        // Solo rota mientras se mantiene presionado el botón derecho.
         if (Input.GetMouseButton(1))
         {
+            // Bloquea el cursor para un mejor control.
             Cursor.lockState = CursorLockMode.Locked;
             Cursor.visible = false;
 
@@ -97,6 +89,7 @@ public class GameStyleCamera : MonoBehaviour
         }
         else
         {
+            // Al soltar el botón derecho, restablece el cursor sin modificar los valores de yaw/pitch.
             Cursor.lockState = CursorLockMode.None;
             Cursor.visible = true;
         }
@@ -105,18 +98,13 @@ public class GameStyleCamera : MonoBehaviour
     private void HandleMovement()
     {
         Vector3 moveDirection = Vector3.zero;
-
         moveDirection += transform.right * Input.GetAxis("Horizontal") * moveSpeed * Time.deltaTime;
         moveDirection += transform.forward * Input.GetAxis("Vertical") * moveSpeed * Time.deltaTime;
 
         if (Input.GetKey(KeyCode.Space))
-        {
             moveDirection += Vector3.up * verticalSpeed * Time.deltaTime;
-        }
         if (Input.GetKey(KeyCode.LeftControl))
-        {
             moveDirection += Vector3.down * verticalSpeed * Time.deltaTime;
-        }
 
         transform.position += moveDirection;
         RestrictPosition();
@@ -134,38 +122,31 @@ public class GameStyleCamera : MonoBehaviour
 
     private void RestrictPosition()
     {
-        Vector3 position = transform.position;
-
-        if (Vector3.Distance(position, Vector3.zero) > maxDistance)
+        Vector3 pos = transform.position;
+        if (Vector3.Distance(pos, Vector3.zero) > maxDistance)
         {
-            Vector3 direction = (position - Vector3.zero).normalized;
-            position = Vector3.zero + direction * maxDistance;
+            pos = Vector3.zero + (pos - Vector3.zero).normalized * maxDistance;
         }
-
-        if (position.y < minHeight)
-        {
-            position.y = minHeight;
-        }
-
-        transform.position = position;
+        pos.y = Mathf.Max(pos.y, minHeight);
+        transform.position = pos;
     }
 
     public void ToggleCameraMode()
     {
         if (isTopDownView)
         {
+            // Vuelve a la vista libre.
             transform.position = freeCameraPosition;
             transform.rotation = freeCameraRotation;
         }
         else
         {
+            // Guarda la posición actual y cambia a vista cenital.
             freeCameraPosition = transform.position;
             freeCameraRotation = transform.rotation;
-
             transform.position = topDownPosition;
             transform.rotation = topDownRotation;
         }
-
         isTopDownView = !isTopDownView;
     }
 }

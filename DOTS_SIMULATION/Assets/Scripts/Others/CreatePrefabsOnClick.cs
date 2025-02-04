@@ -125,25 +125,22 @@ public class CreatePrefabsOnClick : MonoBehaviour
             case "EColi":
                 entityManager.AddComponentData(entity, new EColiComponent
                 {
-                    // Ajustes de crecimiento
-                    MaxScale             = 1.0f,
-                    GrowthTime           = 0f,
-                    GrowthDuration       = 1200f, // 1200 frames => 20 minutos, si frame=1s sim
+                    TimeReference         = 1200f,
+                    SeparationThreshold   = 0.7f,            // 70%
+                    
+                    MaxScale              = 1.0f,
+                    GrowthTime            = 0f,
+                    GrowthDuration        = 1200f * 0.7f,    // 840 frames, por ejemplo
 
-                    // Ajustes de división
                     TimeSinceLastDivision = 0f,
-                    DivisionInterval      = 1200f, // 1200 frames => 20 minutos, si frame=1s sim
+                    DivisionInterval      = 1200f * 0.7f,    // 840 frames, igual que GrowthDuration
 
-                    // Estado
                     HasGeneratedChild     = false,
                     Parent                = Entity.Null,     // sin padre
                     IsInitialCell         = true,            // marca como inicial
-
-                    // Parámetro de separación
-                    SeparationThreshold   = 0.7f,            // 70%
+                    SeparationSign        = 0                // Se asignará al generar la hija
                 });
                 break;
-
             case "SCerevisiae":
                 entityManager.AddComponentData(entity, new SCerevisiaeComponent());
                 break;
