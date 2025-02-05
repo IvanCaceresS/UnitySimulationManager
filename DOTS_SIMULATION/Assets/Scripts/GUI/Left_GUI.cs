@@ -3,6 +3,7 @@ using System;
 using System.Collections.Generic;
 using Unity.Entities;
 using System.Reflection;
+using System.Linq;
 
 public class Left_GUI : MonoBehaviour
 {
@@ -16,18 +17,35 @@ public class Left_GUI : MonoBehaviour
 
     // Variables de tiempo y FPS
     private float simulationStartTime;
-    private float cachedRealTime;
-    private float cachedSimulatedTime;
-    private float cachedFPS;
-    private int cachedFrameCount;
+    public float cachedRealTime;
+    public float cachedSimulatedTime;
+    public float cachedFPS;
+    public int cachedFrameCount;
     private bool hasStartedSimulation = false; // Se activa al presionar "Start Simulation"
 
     // Conteo de entidades y tipos (cache de reflection)
-    private Dictionary<string, int> entityCounts = new Dictionary<string, int>();
+    public Dictionary<string, int> entityCounts = new Dictionary<string, int>();
     private List<Type> validComponentTypes = new List<Type>();
 
     // GUIStyle se inicializará de forma lazy en OnGUI
     private GUIStyle labelStyle;
+
+    /// <summary>
+    /// Propiedad que devuelve los nombres de los organismos a partir de los tipos válidos.
+    /// Se remueve la parte "Component", se ordenan alfabéticamente y se añade "Cantidad de organismos".
+    /// </summary>
+    public IEnumerable<string> OrganismNames
+    {
+        get
+        {
+            List<string> names = validComponentTypes
+                .Select(t => t.Name.Replace("Component", ""))
+                .ToList();
+            names.Sort();
+            names.Add("Cantidad de organismos");
+            return names;
+        }
+    }
 
     void Start()
     {
