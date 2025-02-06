@@ -10,7 +10,7 @@ using UnityEngine.UI;
 using System.Collections;
 using System.Collections.Generic;
 
-// Alias para evitar confusión al usar el struct "Material" de DOTS Physics
+// Alias para DOTS Physics.Material (evita conflicto con UnityEngine.Material)
 using Material = Unity.Physics.Material;
 
 public class CreatePrefabsOnClick : MonoBehaviour
@@ -29,7 +29,7 @@ public class CreatePrefabsOnClick : MonoBehaviour
         mainCamera = Camera.main;
         if (mainCamera == null)
         {
-            Debug.LogError("CreatePrefabsOnClick: No se encontró una cámara principal en la escena.");
+            Debug.LogError("CreatePrefabsOnClick: No se encontró una cámara principal.");
             return;
         }
 
@@ -39,17 +39,15 @@ public class CreatePrefabsOnClick : MonoBehaviour
 
         if (prefabs.Count == 0)
         {
-            Debug.LogError("CreatePrefabsOnClick: No se encontraron prefabs en Resources/Prefabs.");
+            Debug.LogError("No se encontraron prefabs en Resources/Prefabs.");
             return;
         }
 
-        Debug.Log("CreatePrefabsOnClick: Se encontraron " + prefabs.Count + " prefabs.");
-        
-        // Este query busca las entidades que tienen el componente PrefabEntityComponent
-        // para luego instanciar entidades a partir de dichos prefabs.
+        Debug.Log($"Se encontraron {prefabs.Count} prefabs.");
+
+        // Query para ECS prefabs (PrefabEntityComponent)
         spawnerQuery = entityManager.CreateEntityQuery(typeof(PrefabEntityComponent));
 
-        // Iniciamos el primer clic para colocar el primer prefab
         SolicitarColocacion();
     }
 
@@ -57,7 +55,7 @@ public class CreatePrefabsOnClick : MonoBehaviour
     {
         if (isWaitingForClick && Input.GetMouseButtonDown(0))
         {
-            // Usamos UnityEngine.Ray y UnityEngine.RaycastHit
+            // Desambiguamos Ray y RaycastHit (UnityEngine.*)
             UnityEngine.Ray ray = mainCamera.ScreenPointToRay(Input.mousePosition);
             if (UnityEngine.Physics.Raycast(ray, out UnityEngine.RaycastHit hit))
             {
@@ -78,39 +76,37 @@ public class CreatePrefabsOnClick : MonoBehaviour
 
     private void CargarPrefabs()
     {
-        // Cargamos prefabs desde Resources/Prefabs
+        // Cargar los prefabs de Resources/Prefabs
         prefabs = new List<GameObject>(Resources.LoadAll<GameObject>("Prefabs"));
     }
 
     private void CrearEntidad(Vector3 position)
     {
-        if (currentPrefabIndex >= prefabs.Count)
-            return;
+        if (currentPrefabIndex >= prefabs.Count) return;
 
         NativeArray<Entity> spawnerEntities = spawnerQuery.ToEntityArray(Allocator.Temp);
         if (currentPrefabIndex >= spawnerEntities.Length)
         {
-            Debug.LogError("CreatePrefabsOnClick: No se encontró un spawner correspondiente al prefab en el índice " + currentPrefabIndex);
+            Debug.LogError($"No se encontró spawner en índice {currentPrefabIndex}");
             spawnerEntities.Dispose();
             return;
         }
 
-        // Obtenemos el prefab ECS desde PrefabEntityComponent
+        // Instanciamos el prefab ECS
         Entity spawner = spawnerEntities[currentPrefabIndex];
         spawnerEntities.Dispose();
 
         Entity prefabEntity = entityManager.GetComponentData<PrefabEntityComponent>(spawner).prefab;
-        Entity entity = entityManager.Instantiate(prefabEntity);
+        Entity entity       = entityManager.Instantiate(prefabEntity);
 
-        // Leemos la escala y rotación base del prefab
         float originalScale = entityManager.GetComponentData<LocalTransform>(prefabEntity).Scale;
         quaternion originalRotation = entityManager.GetComponentData<LocalTransform>(prefabEntity).Rotation;
 
-        // Rotación aleatoria en Y
-        float randomYRotation = UnityEngine.Random.Range(0f, 360f);
-        quaternion newRotation = math.mul(originalRotation, quaternion.RotateY(math.radians(randomYRotation)));
+        // Rotación aleatoria Y => UnityEngine.Random
+        float randYRot = UnityEngine.Random.Range(0f, 360f);
+        quaternion newRotation = math.mul(originalRotation, quaternion.RotateY(math.radians(randYRot)));
 
-        // Ajustamos la posición para que no quede enterrado
+        // Ajustar posición en Y para no enterrar
         float heightOffset = originalScale * 0.5f;
         float3 adjustedPosition = new float3(
             position.x,
@@ -118,65 +114,76 @@ public class CreatePrefabsOnClick : MonoBehaviour
             position.z
         );
 
-        // Asignamos el LocalTransform final
         entityManager.SetComponentData(entity, new LocalTransform
         {
             Position = adjustedPosition,
             Rotation = newRotation,
-            Scale = originalScale
+            Scale    = originalScale
         });
 
-        // Dependiendo del nombre del prefab, añadimos un componente ECS
         string prefabName = prefabs[currentPrefabIndex].name;
         switch (prefabName)
         {
             case "Cube":
                 entityManager.AddComponentData(entity, new CubeComponent());
                 break;
+
             case "EColi":
                 entityManager.AddComponentData(entity, new EColiComponent
                 {
-                    TimeReference         = 1200f,
+                    TimeReference         = 1200f, // Ej: 20 minutos
                     SeparationThreshold   = 0.7f,
-
                     MaxScale              = 1.0f,
+
                     GrowthTime            = 0f,
-                    GrowthDuration        = 1200f * 0.7f,    // 840 frames aprox.
-
+                    GrowthDuration        = 1200f * 0.7f,
                     TimeSinceLastDivision = 0f,
-                    DivisionInterval      = 1200f * 0.7f,    // 840 frames
-
+                    DivisionInterval      = 1200f * 0.7f,
                     HasGeneratedChild     = false,
+
                     Parent                = Entity.Null,
                     IsInitialCell         = true,
                     SeparationSign        = 0
                 });
                 break;
+
             case "SCerevisiae":
-                entityManager.AddComponentData(entity, new SCerevisiaeComponent());
+                // SCerevisiae => 5400f => 90 min
+                entityManager.AddComponentData(entity, new SCerevisiaeComponent
+                {
+                    TimeReference         = 5400f, // 90 min
+                    SeparationThreshold   = 0.7f,
+                    MaxScale              = 5.0f,
+
+                    GrowthTime            = 0f,
+                    GrowthDuration        = 5400f * 0.7f,
+                    TimeSinceLastDivision = 0f,
+                    DivisionInterval      = 5400f * 0.7f,
+                    HasGeneratedChild     = false,
+
+                    Parent                = Entity.Null,
+                    IsInitialCell         = true,
+                    SeparationSign        = 0
+                });
                 break;
+
             default:
-                Debug.LogWarning($"CreatePrefabsOnClick: No hay un componente ECS definido para el prefab '{prefabName}'");
+                Debug.LogWarning($"No hay componente ECS para '{prefabName}'");
                 break;
         }
 
-        // Añadimos la parte de física (collider, mass, etc.)
+        // Añadimos física
         AddPhysicsComponents(entity, prefabName, originalScale);
-
-        Debug.Log($"CreatePrefabsOnClick: Entidad '{prefabName}' creada en {adjustedPosition}");
+        Debug.Log($"Entidad '{prefabName}' creada en {adjustedPosition}");
     }
 
     private void AddPhysicsComponents(Entity entity, string prefabName, float scale)
     {
-        // Vamos a crear un collider con un Material de DOTS Physics
-        // que tenga Friction y Restitution personalizadas
         BlobAssetReference<Unity.Physics.Collider> collider = default;
-
-        // Creamos un "Material" de DOTS Physics con alta fricción, poco rebote, etc.
         Material mat = new Material
         {
-            Friction    = 8f,   // Alto => difícil rodar
-            Restitution = 0f    // Sin rebote
+            Friction    = 8f,
+            Restitution = 0f
         };
 
         switch (prefabName)
@@ -191,12 +198,11 @@ public class CreatePrefabsOnClick : MonoBehaviour
                         BevelRadius = 0.05f
                     },
                     CollisionFilter.Default,
-                    mat // Pasamos el material
+                    mat
                 );
                 break;
 
             case "EColi":
-                // Por ejemplo, una cápsula vertical
                 collider = Unity.Physics.CapsuleCollider.Create(
                     new CapsuleGeometry
                     {
@@ -210,7 +216,6 @@ public class CreatePrefabsOnClick : MonoBehaviour
                 break;
 
             case "SCerevisiae":
-                // Podrías darle un material distinto, menor fricción, algo de rebote, etc.
                 mat.Friction    = 5f;
                 mat.Restitution = 0.1f;
                 collider = Unity.Physics.SphereCollider.Create(
@@ -225,53 +230,47 @@ public class CreatePrefabsOnClick : MonoBehaviour
                 break;
 
             default:
-                Debug.LogWarning($"CreatePrefabsOnClick: No se pudo asignar un collider para '{prefabName}'");
+                Debug.LogWarning($"No collider para '{prefabName}'");
                 return;
         }
 
-        // Asignamos el collider en la entidad
         entityManager.AddComponentData(entity, new PhysicsCollider { Value = collider });
 
-        // Calculamos masa si el collider está OK
         if (collider.IsCreated)
         {
-            var massProperties = collider.Value.MassProperties;
-            entityManager.AddComponentData(entity, PhysicsMass.CreateDynamic(massProperties, 1f));
+            var massProps = collider.Value.MassProperties;
+            entityManager.AddComponentData(entity, PhysicsMass.CreateDynamic(massProps, 1f));
         }
 
-        // PhysicsVelocity por defecto
         entityManager.AddComponentData(entity, new PhysicsVelocity
         {
             Linear  = float3.zero,
             Angular = float3.zero
         });
 
-        // Gravedad normal
         entityManager.AddComponentData(entity, new PhysicsGravityFactor { Value = 1f });
 
-        // Añadimos o definimos un PhysicsDamping alto en Angular para frenar la rotación
         entityManager.AddComponentData(entity, new PhysicsDamping
         {
             Linear  = 0f,
             Angular = 50f
         });
 
-        Debug.Log($"CreatePrefabsOnClick: Física añadida a '{prefabName}' con alta fricción y damping angular");
+        Debug.Log($"Física añadida a '{prefabName}' (fricción alta, damping angular)");
     }
 
     private void SolicitarColocacion()
     {
-        if (currentPrefabIndex >= prefabs.Count)
-            return;
+        if (currentPrefabIndex >= prefabs.Count) return;
 
         string prefabName = prefabs[currentPrefabIndex].name;
-        messageText.text = "Por favor, clickee donde quiere colocar el organismo '" + prefabName + "'.";
+        messageText.text = $"Por favor, clickee para colocar '{prefabName}'.";
         isWaitingForClick = true;
     }
 
     private void OnAllPrefabsPlaced()
     {
-        Debug.Log("CreatePrefabsOnClick: Todos los prefabs han sido colocados.");
+        Debug.Log("Todos los prefabs colocados.");
         messageText.text = "Todos los prefabs han sido colocados.";
         isWaitingForClick = false;
         StartCoroutine(ShowFinalMessageAndCompleteSetup());
@@ -282,7 +281,6 @@ public class CreatePrefabsOnClick : MonoBehaviour
         yield return new WaitForSeconds(0.5f);
         messageCanvas.SetActive(false);
 
-        // Si existe GameStateManager.CompleteSetup()
         GameStateManager.CompleteSetup();
     }
 
@@ -309,38 +307,30 @@ public class CreatePrefabsOnClick : MonoBehaviour
         messageCanvas.SetActive(true);
     }
 
-    /// <summary>
-    /// Método para resetear la simulación: elimina entidades existentes
-    /// y vuelve a dejar el sistema listo para crear nuevos prefabs.
-    /// </summary>
     public void ResetSimulation()
     {
-        // 1) Query: Entidades de SubScene que NO sean Prefabs ni el plano
         var queryDesc = new EntityQueryDesc
         {
             All = new[] { ComponentType.ReadOnly<SceneSection>() },
             None = new[]
             {
-                ComponentType.ReadOnly<PrefabEntityComponent>(), // Excluye spawners
-                ComponentType.ReadOnly<PlaneComponent>()         // Excluye el plano
+                ComponentType.ReadOnly<PrefabEntityComponent>(),
+                ComponentType.ReadOnly<PlaneComponent>()
             }
         };
 
         var subsceneQuery = entityManager.CreateEntityQuery(queryDesc);
         var toDestroy = subsceneQuery.ToEntityArray(Allocator.Temp);
 
-        // 2) Destruir únicamente esas entidades
         entityManager.DestroyEntity(toDestroy);
         toDestroy.Dispose();
-        
-        Debug.Log("CreatePrefabsOnClick: Se han eliminado todas las entidades de la subescena, excepto los spawners y el plano.");
 
-        // 3) Resetear nuestro estado interno
+        Debug.Log("Se han eliminado entidades excepto spawners y plano.");
+
         currentPrefabIndex = 0;
         isWaitingForClick = false;
         messageCanvas.SetActive(true);
 
-        // 4) Volver a solicitar la colocación desde cero
         SolicitarColocacion();
     }
 }

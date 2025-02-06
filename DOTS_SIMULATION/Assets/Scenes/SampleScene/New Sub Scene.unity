@@ -143,7 +143,7 @@ BoxCollider:
   m_ProvidesContacts: 0
   m_Enabled: 1
   serializedVersion: 3
-  m_Size: {x: 10, y: 2.220446e-16, z: 10}
+  m_Size: {x: 100, y: 2.220446e-16, z: 100}
   m_Center: {x: 0, y: 0, z: 0}
 --- !u!114 &393734164
 MonoBehaviour:
@@ -157,6 +157,62 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 0728c4dcc7d3e3945989eb4fb34b96fa, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+--- !u!1 &594295866
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 594295868}
+  - component: {fileID: 594295869}
+  m_Layer: 0
+  m_Name: Physics
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &594295868
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 594295866}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 15.70693, y: -4.836038, z: 2.4010506}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &594295869
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 594295866}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 4d30974bf68d61043b1572197db94cdc, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  m_SimulationType: 1
+  m_Gravity:
+    x: -0
+    y: -9.81
+    z: -0
+  m_SolverIterationCount: 4
+  m_EnableSolverStabilizationHeuristic: 0
+  m_MultiThreaded: 1
+  m_CollisionTolerance: 0.01
+  m_SynchronizeCollisionWorld: 0
+  m_IncrementalDynamicBroadphase: 0
+  m_IncrementalStaticBroadphase: 0
 --- !u!1 &668074135
 GameObject:
   m_ObjectHideFlags: 0
@@ -167,7 +223,6 @@ GameObject:
   m_Component:
   - component: {fileID: 668074137}
   - component: {fileID: 668074136}
-  - component: {fileID: 668074138}
   m_Layer: 0
   m_Name: Spawner
   m_TagString: Untagged
@@ -202,30 +257,6 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
---- !u!114 &668074138
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 668074135}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 4d30974bf68d61043b1572197db94cdc, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  m_SimulationType: 1
-  m_Gravity:
-    x: -0
-    y: -9.81
-    z: -0
-  m_SolverIterationCount: 4
-  m_EnableSolverStabilizationHeuristic: 0
-  m_MultiThreaded: 1
-  m_CollisionTolerance: 0.01
-  m_SynchronizeCollisionWorld: 0
-  m_IncrementalDynamicBroadphase: 0
-  m_IncrementalStaticBroadphase: 0
 --- !u!1001 &932422896
 PrefabInstance:
   m_ObjectHideFlags: 0
@@ -237,6 +268,10 @@ PrefabInstance:
     - target: {fileID: 1100241952272111496, guid: 61e0026ae9b361b4eb1755f430ce62fd, type: 3}
       propertyPath: m_Name
       value: PlaneECS
+      objectReference: {fileID: 0}
+    - target: {fileID: 1100241952272111496, guid: 61e0026ae9b361b4eb1755f430ce62fd, type: 3}
+      propertyPath: m_StaticEditorFlags
+      value: 126
       objectReference: {fileID: 0}
     - target: {fileID: 3275600182145406587, guid: 61e0026ae9b361b4eb1755f430ce62fd, type: 3}
       propertyPath: m_LocalScale.x
@@ -260,7 +295,7 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 3275600182145406587, guid: 61e0026ae9b361b4eb1755f430ce62fd, type: 3}
       propertyPath: m_LocalPosition.z
-      value: -0.04
+      value: 0
       objectReference: {fileID: 0}
     - target: {fileID: 3275600182145406587, guid: 61e0026ae9b361b4eb1755f430ce62fd, type: 3}
       propertyPath: m_LocalRotation.w
@@ -290,6 +325,18 @@ PrefabInstance:
       propertyPath: m_LocalEulerAnglesHint.z
       value: 0
       objectReference: {fileID: 0}
+    - target: {fileID: 5385818087107762849, guid: 61e0026ae9b361b4eb1755f430ce62fd, type: 3}
+      propertyPath: m_Enabled
+      value: 1
+      objectReference: {fileID: 0}
+    - target: {fileID: 5385818087107762849, guid: 61e0026ae9b361b4eb1755f430ce62fd, type: 3}
+      propertyPath: m_CastShadows
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 5385818087107762849, guid: 61e0026ae9b361b4eb1755f430ce62fd, type: 3}
+      propertyPath: m_DynamicOccludee
+      value: 0
+      objectReference: {fileID: 0}
     m_RemovedComponents: []
     m_RemovedGameObjects: []
     m_AddedGameObjects: []
@@ -307,3 +354,4 @@ SceneRoots:
   m_Roots:
   - {fileID: 668074137}
   - {fileID: 932422896}
+  - {fileID: 594295868}

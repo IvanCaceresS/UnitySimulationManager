@@ -29,38 +29,46 @@ public partial class EColiSystem : SystemBase
     {
         bool isSetupComplete = GameStateManager.IsSetupComplete;
         bool isPaused        = GameStateManager.IsPaused;
-
-        // Asegúrate de que aquí sea el valor correcto (por ejemplo, Time.deltaTime)
         float simDeltaTime   = GameStateManager.DeltaTime;
 
         if (!isSetupComplete || isPaused)
             return;
 
-        // ---------- PASO A: llenar parentMap en SINGLE-THREAD ----------
-        var parentMap = new NativeParallelHashMap<Entity, ParentData>(1024, Allocator.TempJob);
+        // ----------------------------------------------------------------
+        // Calculamos cuántas entidades tienen LocalTransform
+        // para asignar una capacidad superior al HashMap
+        // ----------------------------------------------------------------
+        EntityQuery localTransformQuery = GetEntityQuery(typeof(LocalTransform));
+        int entityCount = localTransformQuery.CalculateEntityCount();
 
-        // Llenado (sin paralelismo) => .Schedule() o .Run()
+        // Factor de seguridad, por ejemplo x2
+        int capacity = math.max(1024, entityCount * 2);
+
+        // Creamos el HashMap con capacidad >= cantidad real de entidades
+        var parentMap  = new NativeParallelHashMap<Entity, ParentData>(capacity, Allocator.TempJob);
+        var mapWriter  = parentMap.AsParallelWriter();
+
+        // PASO A: Llenar parentMap EN PARALELO
         Entities
             .ForEach((Entity e, in LocalTransform transform) =>
             {
-                parentMap.TryAdd(e, new ParentData
+                mapWriter.TryAdd(e, new ParentData
                 {
                     Position = transform.Position,
                     Rotation = transform.Rotation,
                     Scale    = transform.Scale
                 });
             })
-            .Schedule(); // single-threaded job
+            .ScheduleParallel();
 
-        Dependency.Complete(); // Esperamos a que termine
+        Dependency.Complete(); // Esperamos a que termine antes de usar el mapa
 
-        // ---------- PASO B: Lógica EColi en paralelo (leyendo parentMap) ----------
-        var ecb = new EntityCommandBuffer(Allocator.TempJob);
+        // PASO B: Lógica de EColi
+        var ecb         = new EntityCommandBuffer(Allocator.TempJob);
         var ecbParallel = ecb.AsParallelWriter();
 
-        // Observa que aquí no usamos UnityEngine.Random, sino Unity.Mathematics.Random
         Entities
-            .WithReadOnly(parentMap)
+            .WithReadOnly(parentMap)  // Ahora solo lo leemos
             .ForEach((Entity entity, int entityInQueryIndex,
                       ref LocalTransform transform,
                       ref EColiComponent ecoli) =>
@@ -68,23 +76,22 @@ public partial class EColiSystem : SystemBase
                 float currentScale = transform.Scale;
                 float maxScale     = ecoli.MaxScale;
 
-                // Ajustes
                 ecoli.GrowthDuration   = ecoli.TimeReference * ecoli.SeparationThreshold;
                 ecoli.DivisionInterval = ecoli.GrowthDuration;
 
-                // 1) Crecimiento
+                // -- Crecimiento --
                 if (currentScale < maxScale)
                 {
                     ecoli.GrowthTime += simDeltaTime;
-
                     float initialScale = ecoli.IsInitialCell ? maxScale : 0.01f;
+
                     if (ecoli.GrowthTime <= ecoli.GrowthDuration)
                     {
                         float t        = ecoli.GrowthTime / ecoli.GrowthDuration;
                         float newScale = math.lerp(initialScale, maxScale, t);
                         transform.Scale = newScale;
 
-                        if (ecoli.Parent == Entity.Null && 
+                        if (ecoli.Parent == Entity.Null &&
                             math.abs(newScale - currentScale) > ColliderUpdateThreshold)
                         {
                             var newCollider =
@@ -100,21 +107,16 @@ public partial class EColiSystem : SystemBase
                     }
                 }
 
-                // 2) División
+                // -- División --
                 if (transform.Scale >= maxScale)
                 {
                     ecoli.TimeSinceLastDivision += simDeltaTime;
-
                     if (ecoli.TimeSinceLastDivision >= ecoli.DivisionInterval)
                     {
-                        // Generamos un RNG determinista basado en la "index" del job
-                        // para escoger la dirección ±1
                         var rng  = new Unity.Mathematics.Random((uint)(entityInQueryIndex + 1) * 12345);
                         int sign = (rng.NextFloat() < 0.5f) ? 1 : -1;
 
-                        // Creamos la hija
                         Entity childEntity = ecbParallel.Instantiate(entityInQueryIndex, entity);
-
                         LocalTransform childTransform = transform;
                         childTransform.Scale = 0.01f;
 
@@ -137,7 +139,7 @@ public partial class EColiSystem : SystemBase
                     }
                 }
 
-                // 3) Anclaje
+                // -- Anclaje --
                 if (!ecoli.IsInitialCell && ecoli.Parent != Entity.Null)
                 {
                     if (parentMap.TryGetValue(ecoli.Parent, out var parentData))
@@ -164,17 +166,17 @@ public partial class EColiSystem : SystemBase
                     }
                 }
 
+                // Guardamos
                 ecbParallel.SetComponent(entityInQueryIndex, entity, transform);
                 ecbParallel.SetComponent(entityInQueryIndex, entity, ecoli);
 
             })
             .ScheduleParallel();
 
-        Dependency.Complete(); // Terminamos el job
+        Dependency.Complete();
 
         ecb.Playback(EntityManager);
         ecb.Dispose();
-
         parentMap.Dispose();
     }
 }
