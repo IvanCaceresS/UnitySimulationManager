@@ -1,175 +1,180 @@
 using Unity.Burst;
+using Unity.Collections;
 using Unity.Entities;
-using Unity.Transforms;
+using Unity.Jobs;      // Para JobHandle si tu ECS lo requiere
 using Unity.Mathematics;
-using Unity.Physics;            // Quita si no usas DOTS Physics
-using Unity.Physics.Extensions; // Quita si no usas DOTS Physics
-using UnityEngine;              // Para algunos helpers
+using Unity.Physics;
+using Unity.Physics.Extensions;
+using Unity.Transforms;
+using UnityEngine;
+
+// Evitar conflicto con UnityEngine.CapsuleCollider
+using CapsuleCollider = Unity.Physics.CapsuleCollider;
 
 [BurstCompile]
-public partial struct EColiSystem : ISystem
+[UpdateInGroup(typeof(SimulationSystemGroup))]
+public partial class EColiSystem : SystemBase
 {
-    // Umbral para actualizar el collider (solo se recrea si la diferencia en escala es mayor que este valor)
-    const float ColliderUpdateThreshold = 0.01f;
- 
-    public void OnCreate(ref SystemState state) { }
-    public void OnDestroy(ref SystemState state) { }
-    
-    public void OnUpdate(ref SystemState state)
+    struct ParentData
     {
-        // Solo se procesa si la simulación está lista y no está pausada
-        if (!GameStateManager.IsSetupComplete || GameStateManager.IsPaused)
+        public float3 Position;
+        public quaternion Rotation;
+        public float Scale;
+    }
+
+    const float ColliderUpdateThreshold = 0.01f;
+
+    [BurstCompile]
+    protected override void OnUpdate()
+    {
+        bool isSetupComplete = GameStateManager.IsSetupComplete;
+        bool isPaused        = GameStateManager.IsPaused;
+
+        // Asegúrate de que aquí sea el valor correcto (por ejemplo, Time.deltaTime)
+        float simDeltaTime   = GameStateManager.DeltaTime;
+
+        if (!isSetupComplete || isPaused)
             return;
-        
-        float simDeltaTime = GameStateManager.DeltaTime;
-        var entityManager = state.EntityManager;
-        var ecb = new EntityCommandBuffer(Unity.Collections.Allocator.Temp);
-        
-        // Itera sobre todas las entidades con LocalTransform y EColiComponent
-        foreach (var (transform, ecoli, entity) in SystemAPI
-                 .Query<RefRW<LocalTransform>, RefRW<EColiComponent>>()
-                 .WithEntityAccess())
-        {
-            // Actualiza GrowthDuration y DivisionInterval en función de TimeReference y SeparationThreshold
-            ecoli.ValueRW.GrowthDuration = ecoli.ValueRO.TimeReference * ecoli.ValueRO.SeparationThreshold;
-            ecoli.ValueRW.DivisionInterval = ecoli.ValueRW.GrowthDuration;
- 
-            float currentScale = transform.ValueRO.Scale;
-            float maxScale = ecoli.ValueRO.MaxScale;
-            bool isIndependent = (ecoli.ValueRO.Parent == default); // Padre es Entity.Null.
-            bool hasCollider = entityManager.HasComponent<PhysicsCollider>(entity);
-            bool hasVelocity = entityManager.HasComponent<PhysicsVelocity>(entity);
- 
-            // --- 1) Crecimiento ---
-            if (currentScale < maxScale)
+
+        // ---------- PASO A: llenar parentMap en SINGLE-THREAD ----------
+        var parentMap = new NativeParallelHashMap<Entity, ParentData>(1024, Allocator.TempJob);
+
+        // Llenado (sin paralelismo) => .Schedule() o .Run()
+        Entities
+            .ForEach((Entity e, in LocalTransform transform) =>
             {
-                ecoli.ValueRW.GrowthTime += simDeltaTime;
-                // Para células hijas se parte de 0.01; para iniciales, ya nacen completas.
-                float initialScale = ecoli.ValueRO.IsInitialCell ? maxScale : 0.01f;
- 
-                if (ecoli.ValueRW.GrowthTime <= ecoli.ValueRO.GrowthDuration)
+                parentMap.TryAdd(e, new ParentData
                 {
-                    float t = ecoli.ValueRW.GrowthTime / ecoli.ValueRO.GrowthDuration;
-                    float newScale = math.lerp(initialScale, maxScale, t);
-                    transform.ValueRW.Scale = newScale;
- 
-                    // Actualiza el collider solo si la célula es independiente y el cambio es significativo.
-                    if (isIndependent && hasCollider && math.abs(newScale - currentScale) > ColliderUpdateThreshold)
+                    Position = transform.Position,
+                    Rotation = transform.Rotation,
+                    Scale    = transform.Scale
+                });
+            })
+            .Schedule(); // single-threaded job
+
+        Dependency.Complete(); // Esperamos a que termine
+
+        // ---------- PASO B: Lógica EColi en paralelo (leyendo parentMap) ----------
+        var ecb = new EntityCommandBuffer(Allocator.TempJob);
+        var ecbParallel = ecb.AsParallelWriter();
+
+        // Observa que aquí no usamos UnityEngine.Random, sino Unity.Mathematics.Random
+        Entities
+            .WithReadOnly(parentMap)
+            .ForEach((Entity entity, int entityInQueryIndex,
+                      ref LocalTransform transform,
+                      ref EColiComponent ecoli) =>
+            {
+                float currentScale = transform.Scale;
+                float maxScale     = ecoli.MaxScale;
+
+                // Ajustes
+                ecoli.GrowthDuration   = ecoli.TimeReference * ecoli.SeparationThreshold;
+                ecoli.DivisionInterval = ecoli.GrowthDuration;
+
+                // 1) Crecimiento
+                if (currentScale < maxScale)
+                {
+                    ecoli.GrowthTime += simDeltaTime;
+
+                    float initialScale = ecoli.IsInitialCell ? maxScale : 0.01f;
+                    if (ecoli.GrowthTime <= ecoli.GrowthDuration)
                     {
-                        BlobAssetReference<Unity.Physics.Collider> newCollider =
-                            Unity.Physics.CapsuleCollider.Create(new CapsuleGeometry
-                            {
-                                Vertex0 = new float3(0, -newScale * 2.0f, 0),
-                                Vertex1 = new float3(0, newScale * 2.0f, 0),
-                                Radius  = newScale * 0.25f
-                            });
-                        ecb.SetComponent(entity, new PhysicsCollider { Value = newCollider });
+                        float t        = ecoli.GrowthTime / ecoli.GrowthDuration;
+                        float newScale = math.lerp(initialScale, maxScale, t);
+                        transform.Scale = newScale;
+
+                        if (ecoli.Parent == Entity.Null && 
+                            math.abs(newScale - currentScale) > ColliderUpdateThreshold)
+                        {
+                            var newCollider =
+                                CapsuleCollider.Create(new CapsuleGeometry
+                                {
+                                    Vertex0 = new float3(0, -newScale * 2f, 0),
+                                    Vertex1 = new float3(0,  newScale * 2f, 0),
+                                    Radius  = newScale * 0.25f
+                                });
+                            ecbParallel.SetComponent(entityInQueryIndex, entity,
+                                new PhysicsCollider { Value = newCollider });
+                        }
                     }
                 }
- 
-                // Aplica un impulso hacia arriba solo si la célula es independiente.
-                if (isIndependent && hasVelocity)
+
+                // 2) División
+                if (transform.Scale >= maxScale)
                 {
-                    var velocity = entityManager.GetComponentData<PhysicsVelocity>(entity);
-                    velocity.Linear += new float3(0, 1, 0) * 0.1f * simDeltaTime;
-                    velocity.Linear.y = math.clamp(velocity.Linear.y, -1f, 0.0f);
-                    ecb.SetComponent(entity, velocity);
-                }
-            }
- 
-            // --- 2) División: creación de la hija ---
-            if (transform.ValueRO.Scale >= maxScale)
-            {
-                ecoli.ValueRW.TimeSinceLastDivision += simDeltaTime;
-                if (ecoli.ValueRO.TimeSinceLastDivision >= ecoli.ValueRO.DivisionInterval)
-                {
-                    Entity childEntity = ecb.Instantiate(entity);
-                    
-                    // Configura el transform de la hija: inicia con escala pequeña.
-                    var childTransform = transform.ValueRO;
-                    childTransform.Scale = 0.01f;
-                    
-                    // Fijar la dirección "up" de la hija de forma aleatoria (50%: (0,1,0); 50%: (0,-1,0)).
-                    int separationSign = (UnityEngine.Random.value < 0.5f) ? 1 : -1;
-                    
-                    // Configura los datos de la hija, reiniciando GrowthTime y TimeSinceLastDivision, asignando el padre.
-                    var childData = ecoli.ValueRW;
-                    childData.GrowthTime = 0f;
-                    childData.TimeSinceLastDivision = 0f;
-                    childData.HasGeneratedChild = false;
-                    childData.Parent = entity;  // La hija conserva al padre.
-                    childData.IsInitialCell = false;
-                    childData.SeparationSign = separationSign;
-                    ecb.SetComponent(childEntity, childData);
-                    
-                    // Posiciona la hija usando la dirección fija.
-                    float3 localUp = new float3(0, separationSign, 0);
-                    float3 upDir = math.mul(transform.ValueRO.Rotation, localUp);
-                    childTransform.Position = transform.ValueRO.Position + upDir * (transform.ValueRO.Scale * 0.25f);
-                    ecb.SetComponent(childEntity, childTransform);
-                    
-                    ecoli.ValueRW.TimeSinceLastDivision = 0f;
-                }
-            }
- 
-            // --- 3) Lógica de anclaje: separación progresiva ---
-            if (!ecoli.ValueRO.IsInitialCell && ecoli.ValueRO.Parent != default)
-            {
-                var parentTransform = SystemAPI.GetComponent<LocalTransform>(ecoli.ValueRO.Parent);
-                float childScale = transform.ValueRO.Scale;
-                float threshold = ecoli.ValueRO.SeparationThreshold; // Ej.: 0.7 (70%)
-                
-                if (childScale < threshold * maxScale)
-                {
-                    float progress = childScale / maxScale;
-                    float offset = math.lerp(0f, parentTransform.Scale * 4.9f, progress);
-                    // Usa la dirección almacenada (fijada al nacer) para que no cambie durante el crecimiento.
-                    int separationSign = ecoli.ValueRO.SeparationSign;
-                    float3 localUp = new float3(0, separationSign, 0);
-                    float3 up = math.mul(parentTransform.Rotation, localUp);
-                    
-                    transform.ValueRW.Position = parentTransform.Position + up * offset;
-                    transform.ValueRW.Rotation = parentTransform.Rotation;
-                    ecb.SetComponent(entity, transform.ValueRW);
-                }
-                else
-                {
-                    // Libera el anclaje.
-                    ecoli.ValueRW.Parent = default;
-                    
-                    if (hasVelocity)
+                    ecoli.TimeSinceLastDivision += simDeltaTime;
+
+                    if (ecoli.TimeSinceLastDivision >= ecoli.DivisionInterval)
                     {
-                        var velocity = entityManager.GetComponentData<PhysicsVelocity>(entity);
-                        velocity.Linear *= 0.1f;
-                        velocity.Angular = float3.zero;
-                        ecb.SetComponent(entity, velocity);
-                    }
-                    
-                    if (hasCollider)
-                    {
-                        BlobAssetReference<Unity.Physics.Collider> newCollider =
-                            Unity.Physics.CapsuleCollider.Create(new CapsuleGeometry
-                            {
-                                Vertex0 = new float3(0, -transform.ValueRO.Scale * 2.0f, 0),
-                                Vertex1 = new float3(0, transform.ValueRO.Scale * 2.0f, 0),
-                                Radius  = transform.ValueRO.Scale * 0.25f
-                            });
-                        ecb.SetComponent(entity, new PhysicsCollider { Value = newCollider });
+                        // Generamos un RNG determinista basado en la "index" del job
+                        // para escoger la dirección ±1
+                        var rng  = new Unity.Mathematics.Random((uint)(entityInQueryIndex + 1) * 12345);
+                        int sign = (rng.NextFloat() < 0.5f) ? 1 : -1;
+
+                        // Creamos la hija
+                        Entity childEntity = ecbParallel.Instantiate(entityInQueryIndex, entity);
+
+                        LocalTransform childTransform = transform;
+                        childTransform.Scale = 0.01f;
+
+                        var childData = ecoli;
+                        childData.GrowthTime            = 0f;
+                        childData.TimeSinceLastDivision = 0f;
+                        childData.HasGeneratedChild     = false;
+                        childData.IsInitialCell         = false;
+                        childData.Parent                = entity;
+                        childData.SeparationSign        = sign;
+
+                        float3 localUp = new float3(0, sign, 0);
+                        float3 upDir   = math.mul(transform.Rotation, localUp);
+                        childTransform.Position = transform.Position + upDir * (transform.Scale * 0.25f);
+
+                        ecbParallel.SetComponent(entityInQueryIndex, childEntity, childTransform);
+                        ecbParallel.SetComponent(entityInQueryIndex, childEntity, childData);
+
+                        ecoli.TimeSinceLastDivision = 0f;
                     }
                 }
-            }
- 
-            // --- 4) PhysicsDamping (opcional) ---
-            if (!entityManager.HasComponent<PhysicsDamping>(entity))
-            {
-                ecb.AddComponent(entity, new PhysicsDamping { Linear = 0.0f, Angular = 10.0f });
-            }
- 
-            ecb.SetComponent(entity, transform.ValueRW);
-            ecb.SetComponent(entity, ecoli.ValueRW);
-        }
- 
-        ecb.Playback(entityManager);
+
+                // 3) Anclaje
+                if (!ecoli.IsInitialCell && ecoli.Parent != Entity.Null)
+                {
+                    if (parentMap.TryGetValue(ecoli.Parent, out var parentData))
+                    {
+                        float childScale = transform.Scale;
+                        float threshold  = ecoli.SeparationThreshold;
+
+                        if (childScale < threshold * maxScale)
+                        {
+                            float progress = childScale / maxScale;
+                            float offset   = math.lerp(0f, parentData.Scale * 4.9f, progress);
+
+                            float3 localUp = new float3(0, ecoli.SeparationSign, 0);
+                            float3 up      = math.mul(parentData.Rotation, localUp);
+
+                            transform.Position = parentData.Position + up * offset;
+                            transform.Rotation = parentData.Rotation;
+                        }
+                        else
+                        {
+                            ecoli.Parent = Entity.Null;
+                            // Podrías modificar velocity, collider, etc.
+                        }
+                    }
+                }
+
+                ecbParallel.SetComponent(entityInQueryIndex, entity, transform);
+                ecbParallel.SetComponent(entityInQueryIndex, entity, ecoli);
+
+            })
+            .ScheduleParallel();
+
+        Dependency.Complete(); // Terminamos el job
+
+        ecb.Playback(EntityManager);
         ecb.Dispose();
+
+        parentMap.Dispose();
     }
 }
