@@ -22,7 +22,6 @@ class PrefabSpawnerBaker : Baker<PrefabSpawnerAuthoring>
             {
                 prefab = GetEntity(prefab, TransformUsageFlags.Dynamic)
             });
-            // No se puede usar SetName directamente en Baker. Unity no lo permite en este contexto.
             Debug.Log("PrefabSpawnerAuthoring: Entidad creada para " + prefab.name);
         }
     }

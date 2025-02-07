@@ -1,10 +1,6 @@
 using Unity.Entities;
 using Unity.Mathematics;
 
-/// <summary>
-/// Componente ECS para SCerevisiae,
-/// control de tiempo, crecimiento, duplicación, anclaje.
-/// </summary>
 public struct SCerevisiaeComponent : IComponentData
 {
     public float TimeReference;      // e.g. 5400f = 90 min
