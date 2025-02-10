@@ -41,7 +41,7 @@ if required_version not in UNITY_EXECUTABLE:
 # Definición de rutas y variables globales
 # ======================================================
 SIMULATIONS_DIR = "./Simulations"
-SIMULATION_PROJECT_NAME = "Simulation"
+SIMULATION_PROJECT_NAME = "Simulacion"
 SIMULATION_PROJECT_PATH = os.path.join(UNITY_PROJECTS_PATH, SIMULATION_PROJECT_NAME)
 # Archivo que indica qué simulación está cargada en SIMULATION_PROJECT_PATH:
 SIMULATION_LOADED_FILE = os.path.join(SIMULATION_PROJECT_PATH, "simulation_loaded.txt")

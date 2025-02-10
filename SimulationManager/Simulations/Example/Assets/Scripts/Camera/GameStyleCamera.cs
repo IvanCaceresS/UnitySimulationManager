@@ -24,7 +24,7 @@ public class GameStyleCamera : MonoBehaviour
     private float yaw;
     private Vector3 freeCameraPosition;
     private Quaternion freeCameraRotation;
-    private readonly Vector3 topDownPosition = new Vector3(0, 100, 0);
+    private readonly Vector3 topDownPosition = new Vector3(0, 250, 0);
     private readonly Quaternion topDownRotation = Quaternion.Euler(90, 0, 0);
     private bool isTopDownView = false;
     private bool canMove = false;
