@@ -23,9 +23,14 @@ public class Left_GUI : MonoBehaviour
     public int cachedFrameCount;
     private bool hasStartedSimulation = false; // Se activa al presionar "Start Simulation"
 
-    // Conteo de entidades y tipos (cache de reflection)
+    // Intervalo para actualizar el conteo de entidades (en segundos)
+    private const float entityCountUpdateInterval = 2.0f;
+    private float lastEntityCountUpdateTime;
+
+    // Conteo de entidades y tipos (cache de reflection y queries)
     public Dictionary<string, int> entityCounts = new Dictionary<string, int>();
     private List<Type> validComponentTypes = new List<Type>();
+    private Dictionary<Type, EntityQuery> entityQueries = new Dictionary<Type, EntityQuery>();
 
     // GUIStyle se inicializará de forma lazy en OnGUI
     private GUIStyle labelStyle;
@@ -57,6 +62,11 @@ public class Left_GUI : MonoBehaviour
     void OnDestroy()
     {
         GameStateManager.OnSetupComplete -= EnableGUI;
+        // Opcional: si deseas liberar los queries, puedes recorrer entityQueries y disponerlos.
+        // foreach (var query in entityQueries.Values)
+        // {
+        //     query.Dispose();
+        // }
     }
 
     private void EnableGUI()
@@ -68,10 +78,22 @@ public class Left_GUI : MonoBehaviour
 
     void Update()
     {
+        // Actualizar siempre el FPS y el tiempo real usando Time.realtimeSinceStartup
+        cachedFPS = 1f / Time.deltaTime;
+        cachedRealTime = Time.realtimeSinceStartup - simulationStartTime;
+
+        // Si la simulación está activa y no está pausada, actualizamos el tiempo simulado y el conteo de frames
         if (hasStartedSimulation && !GameStateManager.IsPaused)
         {
-            CacheValues();
-            UpdateEntityCounts();
+            cachedFrameCount++;
+            cachedSimulatedTime = cachedFrameCount * GameStateManager.DeltaTime;
+
+            // Actualizar el conteo de entidades solo cada cierto intervalo para optimizar el rendimiento
+            if (Time.realtimeSinceStartup - lastEntityCountUpdateTime >= entityCountUpdateInterval)
+            {
+                UpdateEntityCounts();
+                lastEntityCountUpdateTime = Time.realtimeSinceStartup;
+            }
         }
     }
 
@@ -88,42 +110,32 @@ public class Left_GUI : MonoBehaviour
     }
 
     /// <summary>
-    /// Reinicia los contadores de tiempo y frames.
+    /// Reinicia los contadores de tiempo, frames y FPS.
     /// </summary>
     private void ResetCachedValues()
     {
-        simulationStartTime = Time.time;
+        simulationStartTime = Time.realtimeSinceStartup;
         cachedRealTime = 0f;
         cachedSimulatedTime = 0f;
         cachedFPS = 0f;
         cachedFrameCount = 0;
         entityCounts.Clear();
+        lastEntityCountUpdateTime = Time.realtimeSinceStartup;
     }
 
     /// <summary>
-    /// Actualiza los contadores de tiempo, frames y FPS.
-    /// </summary>
-    private void CacheValues()
-    {
-        cachedFrameCount++;
-        cachedRealTime = Time.time - simulationStartTime;
-        cachedFPS = 1f / Time.deltaTime;
-        cachedSimulatedTime = cachedFrameCount * GameStateManager.DeltaTime;
-    }
-
-    /// <summary>
-    /// Actualiza el conteo de entidades usando la lista cacheada de tipos válidos.
+    /// Actualiza el conteo de entidades usando los queries cacheados.
     /// </summary>
     private void UpdateEntityCounts()
     {
         entityCounts.Clear();
-        var entityManager = World.DefaultGameObjectInjectionWorld.EntityManager;
         int totalEntities = 0;
+        var entityManager = World.DefaultGameObjectInjectionWorld.EntityManager;
 
-        foreach (Type type in validComponentTypes)
+        foreach (var kvp in entityQueries)
         {
-            int count = entityManager.CreateEntityQuery(ComponentType.ReadOnly(type)).CalculateEntityCount();
-            string name = type.Name.Replace("Component", "");
+            int count = kvp.Value.CalculateEntityCount();
+            string name = kvp.Key.Name.Replace("Component", "");
             entityCounts[name] = count;
             totalEntities += count;
         }
@@ -131,11 +143,14 @@ public class Left_GUI : MonoBehaviour
     }
 
     /// <summary>
-    /// Cachea la lista de tipos válidos que implementan IComponentData (filtrados por nombre).
+    /// Cachea la lista de tipos válidos que implementan IComponentData (filtrados por nombre)
+    /// y crea los EntityQuery correspondientes.
     /// </summary>
     private void CacheValidComponentTypes()
     {
         validComponentTypes.Clear();
+        entityQueries.Clear();
+
         foreach (Type type in Assembly.GetExecutingAssembly().GetTypes())
         {
             if (type.IsValueType && typeof(IComponentData).IsAssignableFrom(type))
@@ -144,6 +159,8 @@ public class Left_GUI : MonoBehaviour
                 if (typeName.EndsWith("Component") && typeName != "PrefabEntityComponent" && typeName != "PlaneComponent")
                 {
                     validComponentTypes.Add(type);
+                    var query = World.DefaultGameObjectInjectionWorld.EntityManager.CreateEntityQuery(ComponentType.ReadOnly(type));
+                    entityQueries.Add(type, query);
                 }
             }
         }
@@ -175,7 +192,7 @@ public class Left_GUI : MonoBehaviour
         y += GUIFontSize;
         GUI.Label(new Rect(GUIXPosition, y, GUIWidth, GUIHeight), $"Tiempo Simulado: {FormatTime(cachedSimulatedTime)}.", labelStyle);
         y += GUIFontSize;
-        GUI.Label(new Rect(GUIXPosition, y, GUIWidth, GUIHeight), $"Tiempo Simulado: {GameStateManager.DeltaTime * cachedFPS:F0} x Tiempo Real.", labelStyle);
+        GUI.Label(new Rect(GUIXPosition, y, GUIWidth, GUIHeight), $"Multiplicador de tiempo: {(GameStateManager.DeltaTime * cachedFPS):F0} x Tiempo Real.", labelStyle);
         y += GUIFontSize;
         GUI.Label(new Rect(GUIXPosition, y, GUIWidth, GUIHeight), $"DeltaTime: {GameStateManager.DeltaTime:F2}.", labelStyle);
         y += GUIFontSize;
