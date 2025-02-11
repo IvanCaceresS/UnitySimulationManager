@@ -43,10 +43,52 @@ if required_version not in UNITY_EXECUTABLE:
 SIMULATIONS_DIR = "./Simulations"
 SIMULATION_PROJECT_NAME = "Simulacion"
 SIMULATION_PROJECT_PATH = os.path.join(UNITY_PROJECTS_PATH, SIMULATION_PROJECT_NAME)
-# Archivo que indica qué simulación está cargada en SIMULATION_PROJECT_PATH:
 SIMULATION_LOADED_FILE = os.path.join(SIMULATION_PROJECT_PATH, "simulation_loaded.txt")
-# Variable en memoria para saber cuál fue la última simulación cargada en esta sesión
 last_simulation_loaded = None
+
+# ======================================================
+# Función para monitorear el tamaño de carpeta para el tool de prefabs
+# ======================================================
+def monitor_progress_prefab_tool(stop_event):
+    """
+    Cada 2 segundos, actualiza la etiqueta de estado con el tamaño de la carpeta
+    SIMULATION_PROJECT_PATH, mostrando un mensaje específico para el tool de prefabs.
+    """
+    while not stop_event.is_set():
+        size_bytes = get_folder_size(SIMULATION_PROJECT_PATH)
+        size_mb = size_bytes / (1024 * 1024)
+        update_status(f"Ejecutando tool de prefabs y materiales... Tamaño de carpeta: {size_mb:.2f} MB")
+        time.sleep(2)
+
+# ======================================================
+# Función para ejecutar el tool de creación de prefabs y materiales
+# ======================================================
+def run_prefab_material_tool():
+    """
+    Ejecuta Unity en modo batch para correr el método del Editor que crea los prefabs y materiales.
+    Se invoca el método 'PrefabMaterialCreator.CreatePrefabsAndMaterials' que debe existir en el proyecto de Unity.
+    Mientras se ejecuta, se muestra el tamaño de la carpeta actualizado cada 2 segundos.
+    """
+    log_file = os.path.join(SIMULATION_PROJECT_PATH, "prefab_tool_log.txt")
+    command = [
+        UNITY_EXECUTABLE,
+        "-batchmode",
+        "-quit",
+        "-projectPath", os.path.normpath(SIMULATION_PROJECT_PATH),
+        "-executeMethod", "PrefabMaterialCreator.CreatePrefabsAndMaterials",
+        "-logFile", log_file
+    ]
+    progress_stop_event = threading.Event()
+    monitor_thread = threading.Thread(target=monitor_progress_prefab_tool, args=(progress_stop_event,), daemon=True)
+    monitor_thread.start()
+    try:
+        update_status("Ejecutando tool de prefabs y materiales...")
+        subprocess.run(command, check=True)
+        update_status("Tool de prefabs y materiales ejecutado exitosamente.")
+    except subprocess.CalledProcessError as e:
+        update_status(f"Error al ejecutar el tool de prefabs: {e}")
+    progress_stop_event.set()
+    monitor_thread.join()
 
 # ======================================================
 # Funciones auxiliares para metadatos de simulaciones
@@ -419,6 +461,8 @@ def on_load_simulation():
 
     first_time = (last_simulation_loaded is None)
     if load_simulation(simulation_name, first_time):
+        # Ejecutar el tool de prefabs y materiales antes de iniciar el build
+        run_prefab_material_tool()
         build_simulation_threaded(callback=build_callback)
     else:
         update_status("Error al cargar la simulación.")
