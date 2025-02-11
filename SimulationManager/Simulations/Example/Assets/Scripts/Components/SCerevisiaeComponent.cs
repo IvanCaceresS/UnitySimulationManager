@@ -4,6 +4,7 @@ using Unity.Mathematics;
 public struct SCerevisiaeComponent : IComponentData
 {
     public float TimeReference;      // e.g. 5400f = 90 min
+
     // Crecimiento
     public float MaxScale;
     public float GrowthTime;
@@ -21,4 +22,7 @@ public struct SCerevisiaeComponent : IComponentData
     // Anclaje
     public float SeparationThreshold; // p.ej. 0.7
     public int SeparationSign;
+    
+    // NUEVO: Dirección de crecimiento aleatoria (en el espacio local del padre)
+    public float3 GrowthDirection;
 }

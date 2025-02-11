@@ -16,16 +16,17 @@ public class Left_GUI : MonoBehaviour
     private readonly Rect sliderRect = new Rect(GUIXPosition, GUIYPosition, GUIWidth, GUIHeight);
 
     // Variables de tiempo y FPS
-    private float simulationStartTime;
-    public float cachedRealTime;
-    public float cachedSimulatedTime;
-    public float cachedFPS;
-    public int cachedFrameCount;
+    private float simulationStartTime = 0f;
+    private float accumulatedRealTime = 0f; // Se incrementa solo cuando la simulación está en ejecución (no pausada)
+    public float cachedRealTime = 0f;
+    public float cachedSimulatedTime = 0f;
+    public float cachedFPS = 0f;
+    public int cachedFrameCount = 0;
     private bool hasStartedSimulation = false; // Se activa al presionar "Start Simulation"
 
     // Intervalo para actualizar el conteo de entidades (en segundos)
     private const float entityCountUpdateInterval = 2.0f;
-    private float lastEntityCountUpdateTime;
+    private float lastEntityCountUpdateTime = 0f;
 
     // Conteo de entidades y tipos (cache de reflection y queries)
     public Dictionary<string, int> entityCounts = new Dictionary<string, int>();
@@ -57,12 +58,13 @@ public class Left_GUI : MonoBehaviour
         GameStateManager.OnSetupComplete += EnableGUI;
         this.enabled = false; // Se activa al completar el setup
         CacheValidComponentTypes();
+        ResetCachedValues(); // Inicializa los contadores en 0
     }
 
     void OnDestroy()
     {
         GameStateManager.OnSetupComplete -= EnableGUI;
-        // Opcional: si deseas liberar los queries, puedes recorrer entityQueries y disponerlos.
+        // Opcional: liberar los queries si es necesario:
         // foreach (var query in entityQueries.Values)
         // {
         //     query.Dispose();
@@ -78,31 +80,53 @@ public class Left_GUI : MonoBehaviour
 
     void Update()
     {
-        // Actualizar siempre el FPS y el tiempo real usando Time.realtimeSinceStartup
+        // Actualizar siempre el FPS (esto se puede calcular incluso si la simulación está pausada)
         cachedFPS = 1f / Time.deltaTime;
-        cachedRealTime = Time.realtimeSinceStartup - simulationStartTime;
 
-        // Si la simulación está activa y no está pausada, actualizamos el tiempo simulado y el conteo de frames
-        if (hasStartedSimulation && !GameStateManager.IsPaused)
+        if (hasStartedSimulation)
         {
-            cachedFrameCount++;
-            cachedSimulatedTime = cachedFrameCount * GameStateManager.DeltaTime;
-
-            // Actualizar el conteo de entidades solo cada cierto intervalo para optimizar el rendimiento
-            if (Time.realtimeSinceStartup - lastEntityCountUpdateTime >= entityCountUpdateInterval)
+            // Si la simulación está activa y no está pausada, actualizamos el tiempo real, frames y tiempo simulado
+            if (!GameStateManager.IsPaused)
             {
-                UpdateEntityCounts();
-                lastEntityCountUpdateTime = Time.realtimeSinceStartup;
+                // Incrementamos el tiempo acumulado solo si no está pausada
+                accumulatedRealTime += Time.deltaTime;
+                cachedRealTime = accumulatedRealTime;
+
+                cachedFrameCount++;
+                cachedSimulatedTime = cachedFrameCount * GameStateManager.DeltaTime;
+
+                // Actualizar el conteo de entidades cada cierto intervalo para optimizar el rendimiento
+                if (Time.realtimeSinceStartup - lastEntityCountUpdateTime >= entityCountUpdateInterval)
+                {
+                    UpdateEntityCounts();
+                    lastEntityCountUpdateTime = Time.realtimeSinceStartup;
+                }
             }
+            // Si está pausada, los contadores (real, simulado, frames) permanecen fijos.
+        }
+        else
+        {
+            // Mientras la simulación no ha comenzado, forzamos que los contadores permanezcan en cero
+            cachedRealTime = 0f;
+            cachedSimulatedTime = 0f;
+            cachedFrameCount = 0;
         }
     }
 
+    /// <summary>
+    /// Inicia la simulación, activando el conteo de tiempo y frames.
+    /// </summary>
     public void StartSimulation()
     {
         hasStartedSimulation = true;
+        simulationStartTime = Time.realtimeSinceStartup;
+        accumulatedRealTime = 0f; // Reiniciamos el tiempo acumulado
         ResetCachedValues();
     }
 
+    /// <summary>
+    /// Reinicia la simulación, deteniendo el conteo de tiempo.
+    /// </summary>
     public void ResetSimulation()
     {
         hasStartedSimulation = false;
@@ -114,7 +138,16 @@ public class Left_GUI : MonoBehaviour
     /// </summary>
     private void ResetCachedValues()
     {
-        simulationStartTime = Time.realtimeSinceStartup;
+        if (hasStartedSimulation)
+        {
+            simulationStartTime = Time.realtimeSinceStartup;
+            accumulatedRealTime = 0f;
+        }
+        else
+        {
+            simulationStartTime = 0f;
+            accumulatedRealTime = 0f;
+        }
         cachedRealTime = 0f;
         cachedSimulatedTime = 0f;
         cachedFPS = 0f;

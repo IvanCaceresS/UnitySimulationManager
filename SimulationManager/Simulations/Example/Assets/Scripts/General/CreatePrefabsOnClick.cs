@@ -216,8 +216,6 @@ public class CreatePrefabsOnClick : MonoBehaviour
                 break;
 
             case "SCerevisiae":
-                mat.Friction    = 5f;
-                mat.Restitution = 0.1f;
                 collider = Unity.Physics.SphereCollider.Create(
                     new SphereGeometry
                     {

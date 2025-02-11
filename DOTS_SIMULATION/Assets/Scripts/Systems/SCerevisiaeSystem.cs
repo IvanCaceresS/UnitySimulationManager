@@ -76,9 +76,13 @@ public partial class SCerevisiaeSystem : SystemBase
                 sc.TimeSinceLastDivision += deltaTime;
                 if (sc.TimeSinceLastDivision >= sc.DivisionInterval)
                 {
+                    // Se genera un número aleatorio basado en entityInQueryIndex
                     Unity.Mathematics.Random rng = new Unity.Mathematics.Random((uint)(entityInQueryIndex + 1) * 99999);
-                    int sign = rng.NextFloat() < 0.5f ? 1 : -1;
-                    
+
+                    // Generar un ángulo aleatorio entre 0 y 2π (división en el plano XY)
+                    float angle = rng.NextFloat(0f, math.PI * 2f);
+                    float3 randomDir = new float3(math.cos(angle), math.sin(angle), 0f);
+
                     Entity child = ecb.Instantiate(entityInQueryIndex, entity);
                     LocalTransform childTransform = transform;
                     childTransform.Scale = 0.01f;
@@ -88,7 +92,10 @@ public partial class SCerevisiaeSystem : SystemBase
                     childData.TimeSinceLastDivision = 0f;
                     childData.IsInitialCell = false;
                     childData.Parent = entity;
-                    childData.SeparationSign = sign;
+                    // Asignar la dirección de crecimiento aleatoria al hijo
+                    childData.GrowthDirection = randomDir;
+
+                    // La posición inicial se hereda; se actualizará en el paso de anclaje
                     childTransform.Position = transform.Position;
 
                     ecb.SetComponent(entityInQueryIndex, child, childTransform);
@@ -105,12 +112,15 @@ public partial class SCerevisiaeSystem : SystemBase
                 {
                     float ratio = math.clamp(transform.Scale / (sc.SeparationThreshold * maxScale), 0f, 1f);
                     float offset = (parentData.Scale * 0.5f) * ratio;
-                    float3 up = math.mul(parentData.Rotation, new float3(0, 0, sc.SeparationSign));
-                    transform.Position = parentData.Position + up * offset;
+                    // Convertir la dirección de crecimiento, definida en el espacio local del padre,
+                    // a dirección en el espacio mundial utilizando la rotación del padre.
+                    float3 worldDir = math.mul(parentData.Rotation, sc.GrowthDirection);
+                    transform.Position = parentData.Position + worldDir * offset;
                     transform.Rotation = parentData.Rotation;
                 }
                 else
                 {
+                    // Una vez que el hijo alcanza o supera el umbral, se separa del padre.
                     sc.Parent = Entity.Null;
                 }
             }
