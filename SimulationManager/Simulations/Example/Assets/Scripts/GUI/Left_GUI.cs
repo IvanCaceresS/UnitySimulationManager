@@ -81,7 +81,7 @@ public class Left_GUI : MonoBehaviour
     void Update()
     {
         // Actualizar siempre el FPS (esto se puede calcular incluso si la simulación está pausada)
-        cachedFPS = 1f / Time.deltaTime;
+        cachedFPS = 1f / Time.unscaledDeltaTime;
 
         if (hasStartedSimulation)
         {
