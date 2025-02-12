@@ -58,6 +58,17 @@ def main():
     # Eliminar filas que no se pudieron convertir (NaT)
     df = df.dropna(subset=["Timestamp"])
 
+    # --- Identificar las columnas de organismos ---
+    # Asumiendo que las primeras 7 columnas son fijas y la última es "Cantidad de organismos"
+    # Tomamos todo lo que quede en medio como columnas de organismos.
+    # Alternativamente, podrías usar un set con los nombres fijos y filtrar.
+    known_columns = [
+        "Timestamp", "FPS", "RealTime", "SimulatedTime",
+        "DeltaTime", "FrameCount", "Pausado", "Cantidad de organismos"
+    ]
+    # Filtramos las que no sean parte de las conocidas:
+    organism_columns = [col for col in df.columns if col not in known_columns]
+
     # --- Gráfico 1: FPS over Time ---
     plt.figure(figsize=(12, 6))
     plt.plot(df["Timestamp"], df["FPS"], marker="o", linestyle="-", color="blue")
@@ -85,19 +96,20 @@ def main():
     plt.close()
 
     # --- Gráfico 3: Organism Counts over Time ---
-    plt.figure(figsize=(12, 6))
-    for col in ["Cube", "EColi", "SCerevisiae"]:
-        if col in df.columns:
+    # Graficamos todas las columnas de organismos
+    if organism_columns:
+        plt.figure(figsize=(12, 6))
+        for col in organism_columns:
             plt.plot(df["Timestamp"], df[col], label=col, marker="o", linestyle="-")
-    plt.title("Organism Counts over Time")
-    plt.xlabel("Timestamp")
-    plt.ylabel("Count")
-    plt.xticks(rotation=45)
-    plt.legend()
-    plt.grid(True)
-    plt.tight_layout()
-    plt.savefig(str(output_folder / "organism_counts.png"))
-    plt.close()
+        plt.title("Organism Counts over Time")
+        plt.xlabel("Timestamp")
+        plt.ylabel("Count")
+        plt.xticks(rotation=45)
+        plt.legend()
+        plt.grid(True)
+        plt.tight_layout()
+        plt.savefig(str(output_folder / "organism_counts.png"))
+        plt.close()
 
     # --- Gráfico 4: Total Organisms over Time ---
     if "Cantidad de organismos" in df.columns:
@@ -150,11 +162,10 @@ def main():
         plt.close()
 
     # --- Gráfico 8: Organisms per Simulated Time ---
-    if "SimulatedTime" in df.columns:
+    if "SimulatedTime" in df.columns and organism_columns:
         plt.figure(figsize=(12, 6))
-        for col in ["Cube", "EColi", "SCerevisiae"]:
-            if col in df.columns:
-                plt.plot(df["SimulatedTime"], df[col], label=col, marker="o", linestyle="-")
+        for col in organism_columns:
+            plt.plot(df["SimulatedTime"], df[col], label=col, marker="o", linestyle="-")
         plt.title("Organism Count over Simulated Time")
         plt.xlabel("Simulated Time (s)")
         plt.ylabel("Organism Count")
