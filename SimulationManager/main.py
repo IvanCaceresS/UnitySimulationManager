@@ -95,7 +95,6 @@ def on_create_simulation():
     update_status("Creando simulación, por favor espere...")
     disable_all_buttons()
     try:
-        # Llama a CreateSimulation.py y espera a que termine
         subprocess.run(["python", "./CreateSimulation.py"], check=True)
         update_status("Simulación creada exitosamente.")
     except subprocess.CalledProcessError as e:
@@ -376,8 +375,20 @@ main_window.title("Gestor de Simulaciones de Unity")
 main_window.geometry("700x500")
 main_window.resizable(False, False)
 
+# Configuración de estilos personalizados para botones
 style = ttk.Style(main_window)
 style.theme_use("clam")
+style.configure("TButton", font=("Segoe UI", 10))
+style.configure("Info.TButton", foreground="white", background="#5B6EE1")      # Azul (Cargar simulación)
+style.map("Info.TButton", background=[("active", "#4759c7")])
+style.configure("Success.TButton", foreground="white", background="#4CAF50")   # Verde (Crear simulación)
+style.map("Success.TButton", background=[("active", "#43A047")])
+style.configure("Danger.TButton", foreground="white", background="#F44336")    # Rojo (Eliminar simulación)
+style.map("Danger.TButton", background=[("active", "#E53935")])
+style.configure("Graph.TButton", foreground="white", background="#009688")     # Teal (Mostrar gráficos)
+style.map("Graph.TButton", background=[("active", "#00796B")])
+style.configure("Reload.TButton", foreground="white", background="#9C27B0")    # Morado (Recargar lista)
+style.map("Reload.TButton", background=[("active", "#7B1FA2")])
 
 menubar = tk.Menu(main_window)
 archivo_menu = tk.Menu(menubar, tearoff=0)
@@ -438,23 +449,22 @@ sim_tree.config(yscrollcommand=scrollbar_tree.set)
 button_frame = ttk.Frame(main_frame)
 button_frame.pack(pady=10)
 
-reload_btn = ttk.Button(button_frame, text="Recargar Lista", command=lambda: populate_simulations())
+reload_btn = ttk.Button(button_frame, text="Recargar Lista", style="Reload.TButton", command=lambda: populate_simulations())
 reload_btn.pack(side="left", padx=5)
 
-cargar_btn = ttk.Button(button_frame, text="Cargar Simulación",
+cargar_btn = ttk.Button(button_frame, text="Cargar Simulación", style="Info.TButton",
                           command=lambda: threading.Thread(target=on_load_simulation, daemon=True).start())
 cargar_btn.pack(side="left", padx=5)
 
-graph_btn = ttk.Button(button_frame, text="Mostrar Gráficos",
+graph_btn = ttk.Button(button_frame, text="Mostrar Gráficos", style="Graph.TButton",
                          command=lambda: threading.Thread(target=on_show_graphs, daemon=True).start())
 graph_btn.pack(side="left", padx=5)
 
-delete_btn = ttk.Button(button_frame, text="Eliminar Simulación",
+delete_btn = ttk.Button(button_frame, text="Eliminar Simulación", style="Danger.TButton",
                           command=lambda: on_delete_simulation())
 delete_btn.pack(side="left", padx=5)
 
-# Nuevo botón "Crear Simulación"
-create_btn = ttk.Button(button_frame, text="Crear Simulación",
+create_btn = ttk.Button(button_frame, text="Crear Simulación", style="Success.TButton",
                           command=lambda: threading.Thread(target=on_create_simulation, daemon=True).start())
 create_btn.pack(side="left", padx=5)
 
@@ -468,6 +478,7 @@ def populate_simulations():
     simulations = get_simulations()
     if not simulations:
         messagebox.showerror("Error", "No se encontraron simulaciones en la carpeta './Simulations'.")
+        main_window.destroy()
     else:
         for sim in simulations:
             sim_tree.insert("", "end", values=(sim["name"], sim["creation"], sim["last_opened"]))
@@ -545,7 +556,6 @@ def on_show_graphs():
     try:
         subprocess.Popen(["python", simulation_graphics_path, simulation_name])
         update_status("Los gráficos se están generando. Revise la carpeta correspondiente en Documents.")
-        # Abrir la carpeta de gráficos para previsualización
         open_graphs_folder(simulation_name)
     except Exception as e:
         messagebox.showerror("Error", f"No se pudieron generar los gráficos:\n{e}")
@@ -558,18 +568,6 @@ def on_delete_simulation():
         return
     simulation_name = sim_tree.item(selected[0], "values")[0]
     delete_simulation(simulation_name)
-
-def on_create_simulation():
-    update_status("Creando simulación, por favor espere...")
-    disable_all_buttons()
-    try:
-        subprocess.run(["python", "./CreateSimulation.py"], check=True)
-        update_status("Simulación creada exitosamente.")
-    except subprocess.CalledProcessError as e:
-        messagebox.showerror("Error", f"Error al crear simulación:\n{e}")
-        update_status("Error al crear simulación.")
-    finally:
-        enable_all_buttons()
 
 def show_options_window():
     options_win = tk.Toplevel(main_window)
