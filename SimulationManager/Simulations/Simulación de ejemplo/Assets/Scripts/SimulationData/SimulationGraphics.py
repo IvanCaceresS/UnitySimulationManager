@@ -1,14 +1,31 @@
 import os
+import sys
+from pathlib import Path
 import pandas as pd
 import matplotlib.pyplot as plt
 
 def main():
-    # Ruta del CSV y carpeta de salida
-    csv_path = r"C:\Users\IVAN\AppData\LocalLow\DefaultCompany\InitialSetup\SimulationStats.csv"
-    output_folder = r"C:\Users\IVAN\AppData\LocalLow\DefaultCompany\InitialSetup\Graficos"
-
+    # Verificar que se haya proporcionado el nombre de la simulación como argumento
+    if len(sys.argv) < 2:
+        print("Uso: python SimulationGraphics.py <nombre_simulacion>")
+        return
+    simulation_name = sys.argv[1]
+    
+    # Construir la ruta: My Documents\SimulationLoggerData\<simulationName>
+    documents_path = Path.home() / "Documents"
+    simulation_folder = documents_path / "SimulationLoggerData" / simulation_name
+    
+    # Definir la ruta del CSV y la carpeta de salida para los gráficos
+    csv_path = simulation_folder / "SimulationStats.csv"
+    output_folder = simulation_folder / "Graficos"
+    
     # Crear la carpeta de salida si no existe
-    os.makedirs(output_folder, exist_ok=True)
+    output_folder.mkdir(parents=True, exist_ok=True)
+    
+    # Verificar la existencia del CSV
+    if not csv_path.exists():
+        print("El archivo CSV no existe en:", csv_path)
+        return
 
     # Cargar el CSV usando ';' como separador
     try:
@@ -17,15 +34,29 @@ def main():
         print("Error al leer el archivo CSV:", e)
         return
 
-    # Limpiar nombres de columnas y eliminar espacios en blanco
+    # Limpiar nombres de columnas (eliminar espacios en blanco)
     df.columns = df.columns.str.strip()
 
-    # Convertir Timestamp a formato datetime (día-mes-año hora:minuto:segundo)
+    # Verificar que exista la columna "Timestamp"
+    if "Timestamp" not in df.columns:
+        print("[Error] La columna 'Timestamp' no se encontró en el CSV.")
+        return
+
+    # Filtrar filas donde la columna Timestamp sea "0" (o que al quitar espacios resulte "0")
+    df = df[df["Timestamp"].str.strip() != "0"]
+
+    # Reemplazar múltiples espacios por uno solo (por si hay "12-02-2025  16:23:05")
+    df["Timestamp"] = df["Timestamp"].astype(str).str.replace(r'\s+', ' ', regex=True)
+
+    # Convertir la columna Timestamp a formato datetime (día-mes-año hora:minuto:segundo)
     try:
-        df["Timestamp"] = pd.to_datetime(df["Timestamp"], format="%d-%m-%Y %H:%M:%S")
+        df["Timestamp"] = pd.to_datetime(df["Timestamp"], format="%d-%m-%Y %H:%M:%S", errors="coerce")
     except Exception as e:
         print("Error al convertir la columna Timestamp:", e)
         return
+
+    # Eliminar filas que no se pudieron convertir (NaT)
+    df = df.dropna(subset=["Timestamp"])
 
     # --- Gráfico 1: FPS over Time ---
     plt.figure(figsize=(12, 6))
@@ -36,7 +67,7 @@ def main():
     plt.xticks(rotation=45)
     plt.grid(True)
     plt.tight_layout()
-    plt.savefig(os.path.join(output_folder, "fps_over_time.png"))
+    plt.savefig(str(output_folder / "fps_over_time.png"))
     plt.close()
 
     # --- Gráfico 2: RealTime vs SimulatedTime ---
@@ -50,7 +81,7 @@ def main():
     plt.legend()
     plt.grid(True)
     plt.tight_layout()
-    plt.savefig(os.path.join(output_folder, "time_comparison.png"))
+    plt.savefig(str(output_folder / "time_comparison.png"))
     plt.close()
 
     # --- Gráfico 3: Organism Counts over Time ---
@@ -65,7 +96,7 @@ def main():
     plt.legend()
     plt.grid(True)
     plt.tight_layout()
-    plt.savefig(os.path.join(output_folder, "organism_counts.png"))
+    plt.savefig(str(output_folder / "organism_counts.png"))
     plt.close()
 
     # --- Gráfico 4: Total Organisms over Time ---
@@ -78,7 +109,7 @@ def main():
         plt.xticks(rotation=45)
         plt.grid(True)
         plt.tight_layout()
-        plt.savefig(os.path.join(output_folder, "total_organisms.png"))
+        plt.savefig(str(output_folder / "total_organisms.png"))
         plt.close()
 
     # --- Gráfico 5: Frame Count over Time ---
@@ -91,7 +122,7 @@ def main():
         plt.xticks(rotation=45)
         plt.grid(True)
         plt.tight_layout()
-        plt.savefig(os.path.join(output_folder, "frame_count.png"))
+        plt.savefig(str(output_folder / "frame_count.png"))
         plt.close()
 
     # --- Gráfico 6: FPS Distribution ---
@@ -102,13 +133,12 @@ def main():
     plt.ylabel("Frequency")
     plt.grid(True)
     plt.tight_layout()
-    plt.savefig(os.path.join(output_folder, "fps_histogram.png"))
+    plt.savefig(str(output_folder / "fps_histogram.png"))
     plt.close()
 
-    # --- Gráfico 7: Total Organisms vs FPS (Media de FPS por cantidad de organismos) ---
+    # --- Gráfico 7: Average FPS per Total Organisms ---
     if "Cantidad de organismos" in df.columns:
         df_grouped = df.groupby("Cantidad de organismos")["FPS"].mean().reset_index()
-
         plt.figure(figsize=(12, 6))
         plt.plot(df_grouped["Cantidad de organismos"], df_grouped["FPS"], marker="o", linestyle="-", color="red")
         plt.title("Average FPS per Total Organisms")
@@ -116,7 +146,7 @@ def main():
         plt.ylabel("Average FPS")
         plt.grid(True)
         plt.tight_layout()
-        plt.savefig(os.path.join(output_folder, "total_organisms_vs_fps.png"))
+        plt.savefig(str(output_folder / "total_organisms_vs_fps.png"))
         plt.close()
 
     # --- Gráfico 8: Organisms per Simulated Time ---
@@ -131,10 +161,10 @@ def main():
         plt.legend()
         plt.grid(True)
         plt.tight_layout()
-        plt.savefig(os.path.join(output_folder, "organisms_vs_simulated_time.png"))
+        plt.savefig(str(output_folder / "organisms_vs_simulated_time.png"))
         plt.close()
 
-    print("Se han generado los gráficos y se han guardado en:", output_folder)
+    print("SimulationGraphics: Los gráficos se han generado y se han guardado en:", output_folder)
 
 if __name__ == "__main__":
     main()

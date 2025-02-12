@@ -7,6 +7,7 @@ import time
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 from dotenv import load_dotenv
+from pathlib import Path
 
 # ======================================================
 # Cargar configuración desde .env y verificar versión
@@ -17,10 +18,10 @@ UNITY_EXECUTABLE = os.environ.get("UNITY_EXECUTABLE")
 UNITY_PROJECTS_PATH = os.environ.get("UNITY_PROJECTS_PATH")
 
 if not UNITY_EXECUTABLE or not UNITY_PROJECTS_PATH:
-    messagebox.showerror("Error de Configuración", "No se encontraron las variables UNITY_EXECUTABLE o UNITY_PROJECTS_PATH en el .env")
+    messagebox.showerror("Error de Configuración", 
+                         "No se encontraron las variables UNITY_EXECUTABLE o UNITY_PROJECTS_PATH en el archivo .env")
     exit(1)
 
-# Verificar que el ejecutable corresponda a la versión requerida
 required_version = "6000.0.32f1"
 if required_version not in UNITY_EXECUTABLE:
     respuesta = messagebox.askyesno("Versión de Unity incorrecta",
@@ -31,10 +32,12 @@ if required_version not in UNITY_EXECUTABLE:
         if nuevo_path and required_version in nuevo_path:
             UNITY_EXECUTABLE = nuevo_path
         else:
-            messagebox.showerror("Error", f"El ejecutable seleccionado no es la versión requerida ({required_version}). Se abortará la ejecución.")
+            messagebox.showerror("Error", 
+                f"El ejecutable seleccionado no es la versión requerida ({required_version}). Se abortará la ejecución.")
             exit(1)
     else:
-        messagebox.showerror("Error", f"Modifique la variable de entorno UNITY_EXECUTABLE a la versión {required_version}.")
+        messagebox.showerror("Error", 
+            f"Modifique la variable UNITY_EXECUTABLE a la versión {required_version}.")
         exit(1)
 
 # ======================================================
@@ -43,32 +46,75 @@ if required_version not in UNITY_EXECUTABLE:
 SIMULATIONS_DIR = "./Simulations"
 SIMULATION_PROJECT_NAME = "Simulacion"
 SIMULATION_PROJECT_PATH = os.path.join(UNITY_PROJECTS_PATH, SIMULATION_PROJECT_NAME)
-SIMULATION_LOADED_FILE = os.path.join(SIMULATION_PROJECT_PATH, "simulation_loaded.txt")
+# El archivo simulation_loaded.txt se guardará en:
+# SIMULATION_PROJECT_PATH/Assets/StreamingAssets/simulation_loaded.txt
+ASSETS_FOLDER = os.path.join(SIMULATION_PROJECT_PATH, "Assets")
+STREAMING_ASSETS_FOLDER = os.path.join(ASSETS_FOLDER, "StreamingAssets")
+SIMULATION_LOADED_FILE = os.path.join(STREAMING_ASSETS_FOLDER, "simulation_loaded.txt")
 last_simulation_loaded = None
+
+# ======================================================
+# Función para abrir la carpeta de gráficos
+# ======================================================
+def open_graphs_folder(simulation_name):
+    folder_path = Path.home() / "Documents" / "SimulationLoggerData" / simulation_name / "Graficos"
+    if folder_path.exists():
+        try:
+            if platform.system() == "Windows":
+                subprocess.Popen(["explorer", str(folder_path)])
+            elif platform.system() == "Darwin":
+                subprocess.Popen(["open", str(folder_path)])
+            else:
+                subprocess.Popen(["xdg-open", str(folder_path)])
+        except Exception as e:
+            messagebox.showerror("Error", f"No se pudo abrir la carpeta de gráficos:\n{e}")
+    else:
+        messagebox.showerror("Error", f"La carpeta de gráficos no existe: {folder_path}")
+
+# ======================================================
+# Funciones para deshabilitar y habilitar botones
+# ======================================================
+def disable_all_buttons():
+    reload_btn.config(state="disabled")
+    cargar_btn.config(state="disabled")
+    graph_btn.config(state="disabled")
+    delete_btn.config(state="disabled")
+    create_btn.config(state="disabled")
+
+def enable_all_buttons():
+    reload_btn.config(state="normal")
+    cargar_btn.config(state="normal")
+    graph_btn.config(state="normal")
+    delete_btn.config(state="normal")
+    create_btn.config(state="normal")
+
+# ======================================================
+# Función para crear simulación (llama a CreateSimulation.py)
+# ======================================================
+def on_create_simulation():
+    update_status("Creando simulación, por favor espere...")
+    disable_all_buttons()
+    try:
+        # Llama a CreateSimulation.py y espera a que termine
+        subprocess.run(["python", "./CreateSimulation.py"], check=True)
+        update_status("Simulación creada exitosamente.")
+    except subprocess.CalledProcessError as e:
+        messagebox.showerror("Error", f"Error al crear simulación:\n{e}")
+        update_status("Error al crear simulación.")
+    finally:
+        enable_all_buttons()
 
 # ======================================================
 # Función para monitorear el tamaño de carpeta para el tool de prefabs
 # ======================================================
 def monitor_progress_prefab_tool(stop_event):
-    """
-    Cada 2 segundos, actualiza la etiqueta de estado con el tamaño de la carpeta
-    SIMULATION_PROJECT_PATH, mostrando un mensaje específico para el tool de prefabs.
-    """
     while not stop_event.is_set():
         size_bytes = get_folder_size(SIMULATION_PROJECT_PATH)
         size_mb = size_bytes / (1024 * 1024)
-        update_status(f"Ejecutando tool de prefabs y materiales... Tamaño de carpeta: {size_mb:.2f} MB")
+        update_status(f"[Prefabs] Tamaño actual del directorio: {size_mb:.2f} MB")
         time.sleep(2)
 
-# ======================================================
-# Función para ejecutar el tool de creación de prefabs y materiales
-# ======================================================
 def run_prefab_material_tool():
-    """
-    Ejecuta Unity en modo batch para correr el método del Editor que crea los prefabs y materiales.
-    Se invoca el método 'PrefabMaterialCreator.CreatePrefabsAndMaterials' que debe existir en el proyecto de Unity.
-    Mientras se ejecuta, se muestra el tamaño de la carpeta actualizado cada 2 segundos.
-    """
     log_file = os.path.join(SIMULATION_PROJECT_PATH, "prefab_tool_log.txt")
     command = [
         UNITY_EXECUTABLE,
@@ -82,11 +128,11 @@ def run_prefab_material_tool():
     monitor_thread = threading.Thread(target=monitor_progress_prefab_tool, args=(progress_stop_event,), daemon=True)
     monitor_thread.start()
     try:
-        update_status("Ejecutando tool de prefabs y materiales...")
+        update_status("Ejecutando la herramienta de prefabs y materiales...")
         subprocess.run(command, check=True)
-        update_status("Tool de prefabs y materiales ejecutado exitosamente.")
+        update_status("La herramienta de prefabs y materiales se ejecutó correctamente.")
     except subprocess.CalledProcessError as e:
-        update_status(f"Error al ejecutar el tool de prefabs: {e}")
+        update_status(f"[Error] Ocurrió un error al ejecutar la herramienta de prefabs: {e}")
     progress_stop_event.set()
     monitor_thread.join()
 
@@ -94,10 +140,6 @@ def run_prefab_material_tool():
 # Funciones auxiliares para metadatos de simulaciones
 # ======================================================
 def get_simulations():
-    """
-    Retorna una lista de diccionarios con información de cada simulación (nombre, fecha de creación y última apertura)
-    de las carpetas en SIMULATIONS_DIR que contengan las carpetas Assets, Packages y ProjectSettings.
-    """
     simulations = []
     if not os.path.exists(SIMULATIONS_DIR):
         messagebox.showerror("Error", f"No se encontró la carpeta {SIMULATIONS_DIR}")
@@ -135,25 +177,15 @@ def get_simulations():
     return simulations
 
 def update_last_opened(simulation_name):
-    """
-    Actualiza (o crea) el archivo 'last_opened.txt' en la carpeta de la simulación en SIMULATIONS_DIR
-    con el timestamp actual.
-    """
     sim_folder = os.path.join(SIMULATIONS_DIR, simulation_name)
     timestamp = time.time()
     try:
         with open(os.path.join(sim_folder, "last_opened.txt"), "w") as f:
             f.write(str(timestamp))
     except Exception as e:
-        print("Error al actualizar last_opened:", e)
+        print(f"[Error] No se pudo actualizar el last_opened: {e}")
 
-# ======================================================
-# Funciones auxiliares para copia y build
-# ======================================================
 def copy_directory(src, dst):
-    """
-    Copia el directorio 'src' a 'dst'. Si 'dst' existe se elimina primero.
-    """
     try:
         if os.path.exists(dst):
             shutil.rmtree(dst)
@@ -163,16 +195,10 @@ def copy_directory(src, dst):
         messagebox.showerror("Error", f"Error al copiar {src} a {dst}:\n{e}")
 
 def load_simulation(simulation_name, first_time=True):
-    """
-    Copia las carpetas necesarias de la simulación seleccionada a SIMULATION_PROJECT_PATH.
-    Si es la primera carga se copian Assets, Packages y ProjectSettings.
-    Si se carga una simulación nueva, solo se actualiza la carpeta Assets (eliminando Build y Assets).
-    Al finalizar, se actualiza la fecha de última apertura y se guarda el nombre de la simulación en SIMULATION_LOADED_FILE.
-    """
     global last_simulation_loaded
     sim_source_path = os.path.join(SIMULATIONS_DIR, simulation_name)
     if not os.path.exists(sim_source_path):
-        messagebox.showerror("Error", f"La simulación {simulation_name} no existe.")
+        messagebox.showerror("Error", f"La simulación '{simulation_name}' no existe.")
         return False
     if not os.path.exists(SIMULATION_PROJECT_PATH):
         os.makedirs(SIMULATION_PROJECT_PATH)
@@ -190,18 +216,23 @@ def load_simulation(simulation_name, first_time=True):
         dst_assets = os.path.join(SIMULATION_PROJECT_PATH, "Assets")
         copy_directory(src_assets, dst_assets)
     update_last_opened(simulation_name)
+    # Asegurarse de que la carpeta StreamingAssets exista (después de copiar Assets)
+    if not os.path.exists(STREAMING_ASSETS_FOLDER):
+        try:
+            os.makedirs(STREAMING_ASSETS_FOLDER, exist_ok=True)
+        except Exception as e:
+            messagebox.showerror("Error", f"No se pudo crear la carpeta StreamingAssets:\n{e}")
+            return False
+    # Escribir simulation_loaded.txt en StreamingAssets
     try:
         with open(SIMULATION_LOADED_FILE, "w") as f:
             f.write(simulation_name)
     except Exception as e:
-        print("Error al escribir simulation_loaded.txt:", e)
+        print(f"[Error] No se pudo escribir en simulation_loaded.txt: {e}")
     last_simulation_loaded = simulation_name
     return True
 
 def get_build_target_and_executable(project_path):
-    """
-    Según el sistema operativo, retorna el parámetro build_target y la ruta al ejecutable generado.
-    """
     sistema = platform.system()
     if sistema == "Windows":
         build_target = "Win64"
@@ -218,15 +249,9 @@ def get_build_target_and_executable(project_path):
     return build_target, ejecutable
 
 def update_status(message):
-    """
-    Actualiza la etiqueta de estado en la interfaz de forma thread-safe.
-    """
     main_window.after(0, lambda: status_label.config(text=message))
 
 def get_folder_size(path):
-    """
-    Calcula recursivamente el tamaño total (en bytes) de la carpeta 'path'.
-    """
     total_size = 0
     for dirpath, dirnames, filenames in os.walk(path):
         for filename in filenames:
@@ -238,21 +263,13 @@ def get_folder_size(path):
     return total_size
 
 def monitor_progress(stop_event):
-    """
-    Hilo que, cada 2 segundos, calcula y muestra el tamaño total de la carpeta SIMULATION_PROJECT_PATH.
-    """
     while not stop_event.is_set():
         size_bytes = get_folder_size(SIMULATION_PROJECT_PATH)
         size_mb = size_bytes / (1024 * 1024)
-        update_status(f"Construyendo... Tamaño de carpeta: {size_mb:.2f} MB")
+        update_status(f"[Build] Tamaño actual del directorio: {size_mb:.2f} MB")
         time.sleep(2)
 
 def build_simulation_threaded(callback=None):
-    """
-    Ejecuta el build de Unity en modo batch con hasta 2 intentos (espera 30 s entre intentos).
-    Mientras se ejecuta, se muestra el tamaño total de la carpeta SIMULATION_PROJECT_PATH para indicar progreso.
-    Si falla, se lee el log para identificar si el error es que no se encontró BuildScript.PerformBuild.
-    """
     build_target, _ = get_build_target_and_executable(SIMULATION_PROJECT_PATH)
     log_file = os.path.join(SIMULATION_PROJECT_PATH, "build_log.txt")
     command = [
@@ -260,7 +277,7 @@ def build_simulation_threaded(callback=None):
         "-batchmode",
         "-quit",
         "-projectPath", os.path.normpath(SIMULATION_PROJECT_PATH),
-        "-executeMethod", "BuildScript.PerformBuild",  # Debe existir en el proyecto de Unity
+        "-executeMethod", "BuildScript.PerformBuild",
         "-buildTarget", build_target,
         "-logFile", log_file
     ]
@@ -273,15 +290,15 @@ def build_simulation_threaded(callback=None):
 
     for attempt in range(max_retries):
         try:
-            update_status(f"Ejecutando build (Intento {attempt + 1} de {max_retries})...")
+            update_status(f"[Build] Ejecutando compilación (Intento {attempt + 1} de {max_retries})...")
             subprocess.run(command, check=True)
-            update_status("Build completado exitosamente.")
+            update_status("[Build] Compilación completada exitosamente.")
             success = True
             break
         except subprocess.CalledProcessError as e:
-            update_status(f"Error durante el build (Intento {attempt + 1}): {e}")
+            update_status(f"[Error] Falló la compilación (Intento {attempt + 1}): {e}")
             if attempt < max_retries - 1:
-                update_status("Esperando 30 segundos para reintentar...")
+                update_status("[Build] Reintentando en 30 segundos...")
                 time.sleep(30)
     progress_stop_event.set()
     monitor_thread.join()
@@ -294,19 +311,16 @@ def build_simulation_threaded(callback=None):
             log_contents = ""
         if "executeMethod class 'BuildScript' could not be found" in log_contents:
             messagebox.showerror("Error en el Build",
-                "El build falló: no se encontró el método BuildScript.PerformBuild.\n"
-                "Asegúrese de incluir en el proyecto (por ejemplo, en Assets/Editor) un script BuildScript.cs con un método estático 'PerformBuild'.\n\n"
-                "Revisa el log: " + log_file)
+                "La compilación falló: no se encontró el método BuildScript.PerformBuild.\n"
+                "Verifique que exista un script (por ejemplo, en Assets/Editor) con un método estático 'PerformBuild'.\n\n"
+                f"Revise el log: {log_file}")
         else:
-            messagebox.showerror("Error en el Build", "El build falló. Revisa el log: " + log_file)
-        update_status("Build fallido.")
+            messagebox.showerror("Error en el Build", f"La compilación falló. Revise el log: {log_file}")
+        update_status("[Build] Compilación fallida.")
     if callback:
         main_window.after(0, lambda: callback(success))
 
 def open_simulation_executable():
-    """
-    Ejecuta el build generado (el ejecutable) según el sistema operativo.
-    """
     _, ejecutable = get_build_target_and_executable(SIMULATION_PROJECT_PATH)
     if os.path.exists(ejecutable):
         try:
@@ -320,16 +334,42 @@ def open_simulation_executable():
         messagebox.showerror("Error", f"No se encontró el ejecutable en:\n{ejecutable}")
 
 def open_in_unity():
-    """
-    Abre el proyecto en el editor de Unity.
-    """
     try:
         subprocess.Popen([UNITY_EXECUTABLE, "-projectPath", os.path.normpath(SIMULATION_PROJECT_PATH)])
     except Exception as e:
         messagebox.showerror("Error", f"No se pudo abrir el proyecto en Unity:\n{e}")
 
+def delete_simulation(simulation_name):
+    confirm = messagebox.askyesno("Confirmación",
+        f"¿Está seguro que desea eliminar la simulación '{simulation_name}'?\n"
+        "Esta acción eliminará permanentemente los archivos de la carpeta de simulación y sus datos de estadísticas.")
+    if not confirm:
+        update_status("Eliminación cancelada.")
+        return
+
+    # Eliminar carpeta en SIMULATIONS_DIR
+    sim_path = os.path.join(SIMULATIONS_DIR, simulation_name)
+    if os.path.exists(sim_path):
+        try:
+            shutil.rmtree(sim_path)
+        except Exception as e:
+            messagebox.showerror("Error", f"No se pudo eliminar la carpeta de la simulación en {sim_path}:\n{e}")
+            return
+    # Eliminar carpeta de datos en Documents/SimulationLoggerData
+    documents_path = Path.home() / "Documents"
+    data_path = documents_path / "SimulationLoggerData" / simulation_name
+    if data_path.exists():
+        try:
+            shutil.rmtree(data_path)
+        except Exception as e:
+            messagebox.showerror("Error", f"No se pudo eliminar la carpeta de datos en {data_path}:\n{e}")
+            return
+
+    update_status(f"La simulación '{simulation_name}' fue eliminada correctamente.")
+    populate_simulations()
+
 # ======================================================
-# Interfaz Gráfica (GUI) – Diseño Profesional
+# INTERFAZ GRÁFICA (GUI)
 # ======================================================
 main_window = tk.Tk()
 main_window.title("Gestor de Simulaciones de Unity")
@@ -339,7 +379,6 @@ main_window.resizable(False, False)
 style = ttk.Style(main_window)
 style.theme_use("clam")
 
-# Menú superior
 menubar = tk.Menu(main_window)
 archivo_menu = tk.Menu(menubar, tearoff=0)
 archivo_menu.add_command(label="Salir", command=main_window.destroy)
@@ -349,20 +388,17 @@ ayuda_menu.add_command(label="Acerca de", command=lambda: messagebox.showinfo("A
 menubar.add_cascade(label="Ayuda", menu=ayuda_menu)
 main_window.config(menu=menubar)
 
-# Cabecera
 header_frame = ttk.Frame(main_window, padding=(10, 10))
 header_frame.pack(fill="x")
 header_label = ttk.Label(header_frame, text="Gestor de Simulaciones de Unity", font=("Segoe UI", 20, "bold"), foreground="#2C3E50")
 header_label.pack(side="left")
 
-# Marco principal
 main_frame = ttk.Frame(main_window, padding=10)
 main_frame.pack(expand=True, fill="both")
 
 select_label = ttk.Label(main_frame, text="Seleccione una simulación:", font=("Segoe UI", 14))
 select_label.pack(pady=(10, 5))
 
-# --- Treeview para listado de simulaciones ---
 tree_frame = ttk.Frame(main_frame)
 tree_frame.pack(fill="both", expand=True, padx=20, pady=10)
 
@@ -399,7 +435,6 @@ scrollbar_tree = ttk.Scrollbar(tree_frame, orient="vertical", command=sim_tree.y
 scrollbar_tree.pack(side="right", fill="y")
 sim_tree.config(yscrollcommand=scrollbar_tree.set)
 
-# --- Botones para recargar y cargar ---
 button_frame = ttk.Frame(main_frame)
 button_frame.pack(pady=10)
 
@@ -410,29 +445,38 @@ cargar_btn = ttk.Button(button_frame, text="Cargar Simulación",
                           command=lambda: threading.Thread(target=on_load_simulation, daemon=True).start())
 cargar_btn.pack(side="left", padx=5)
 
-# Barra de estado
+graph_btn = ttk.Button(button_frame, text="Mostrar Gráficos",
+                         command=lambda: threading.Thread(target=on_show_graphs, daemon=True).start())
+graph_btn.pack(side="left", padx=5)
+
+delete_btn = ttk.Button(button_frame, text="Eliminar Simulación",
+                          command=lambda: on_delete_simulation())
+delete_btn.pack(side="left", padx=5)
+
+# Nuevo botón "Crear Simulación"
+create_btn = ttk.Button(button_frame, text="Crear Simulación",
+                          command=lambda: threading.Thread(target=on_create_simulation, daemon=True).start())
+create_btn.pack(side="left", padx=5)
+
 status_frame = ttk.Frame(main_window)
 status_frame.pack(fill="x", side="bottom")
-status_label = ttk.Label(status_frame, text="Esperando selección...", relief="sunken", anchor="w", font=("Segoe UI", 10))
+status_label = ttk.Label(status_frame, text="Seleccione una simulación para comenzar.", relief="sunken", anchor="w", font=("Segoe UI", 10))
 status_label.pack(fill="x")
 
-# ======================================================
-# Funciones de la interfaz
-# ======================================================
 def populate_simulations():
     sim_tree.delete(*sim_tree.get_children())
     simulations = get_simulations()
     if not simulations:
         messagebox.showerror("Error", "No se encontraron simulaciones en la carpeta './Simulations'.")
-        main_window.destroy()
     else:
         for sim in simulations:
             sim_tree.insert("", "end", values=(sim["name"], sim["creation"], sim["last_opened"]))
+    update_status("Lista de simulaciones actualizada.")
 
 def on_load_simulation():
     selected = sim_tree.selection()
     if not selected:
-        messagebox.showwarning("Advertencia", "Seleccione una simulación de la lista.")
+        messagebox.showwarning("Advertencia", "Por favor, seleccione una simulación de la lista.")
         return
     simulation_name = sim_tree.item(selected[0], "values")[0]
     global last_simulation_loaded
@@ -445,23 +489,21 @@ def on_load_simulation():
             loaded_sim = ""
         if loaded_sim == simulation_name:
             update_last_opened(simulation_name)
-            update_status("La simulación ya está cargada. Mostrando opciones...")
+            update_status("La simulación seleccionada ya está cargada. Mostrando opciones disponibles...")
             main_window.after(500, show_options_window)
             return
 
+    update_status("Cargando la simulación, por favor espere...")
     if not os.path.exists(SIMULATION_PROJECT_PATH):
         messagebox.showinfo("Aviso",
-            "Esta es la primera vez que se carga una simulación.\n"
-            "Por favor, tenga paciencia, ya que se va a crear desde cero el ambiente de la simulación (alrededor de 2500 MB) y demorará más que las demás.")
-
+            "Esta es la primera vez que se carga la simulación.\n"
+            "Se creará el ambiente de la simulación, lo que puede tardar unos minutos.")
     reload_btn.config(state="disabled")
     cargar_btn.config(state="disabled")
     sim_tree.config(selectmode="none")
-    update_status("Cargando simulación...")
 
     first_time = (last_simulation_loaded is None)
     if load_simulation(simulation_name, first_time):
-        # Ejecutar el tool de prefabs y materiales antes de iniciar el build
         run_prefab_material_tool()
         build_simulation_threaded(callback=build_callback)
     else:
@@ -477,6 +519,58 @@ def build_callback(success):
     cargar_btn.config(state="normal")
     sim_tree.config(selectmode="browse")
 
+def on_show_graphs():
+    selected = sim_tree.selection()
+    if not selected:
+        messagebox.showwarning("Advertencia", "Seleccione una simulación para visualizar sus gráficos.")
+        return
+    simulation_name = sim_tree.item(selected[0], "values")[0]
+    update_status("Generando gráficos, por favor espere...")
+    
+    # Verificar que exista el CSV en My Documents\SimulationLoggerData\<simulationName>\SimulationStats.csv
+    documents_path = Path.home() / "Documents"
+    csv_path = documents_path / "SimulationLoggerData" / simulation_name / "SimulationStats.csv"
+    if not csv_path.exists():
+        messagebox.showerror("Error", f"[Error] No se encontró el archivo CSV en:\n{csv_path}")
+        update_status(f"[Error] No se encontró el archivo CSV en: {csv_path}")
+        return
+    
+    # Ruta al script de gráficos:
+    # ./Simulations/<simulationName>/Assets/Scripts/SimulationData/SimulationGraphics.py
+    simulation_graphics_path = os.path.join(SIMULATIONS_DIR, simulation_name, "Assets", "Scripts", "SimulationData", "SimulationGraphics.py")
+    if not os.path.exists(simulation_graphics_path):
+        messagebox.showerror("Error", f"No se encontró el script de gráficos en:\n{simulation_graphics_path}")
+        update_status("Error: Script de gráficos no encontrado.")
+        return
+    try:
+        subprocess.Popen(["python", simulation_graphics_path, simulation_name])
+        update_status("Los gráficos se están generando. Revise la carpeta correspondiente en Documents.")
+        # Abrir la carpeta de gráficos para previsualización
+        open_graphs_folder(simulation_name)
+    except Exception as e:
+        messagebox.showerror("Error", f"No se pudieron generar los gráficos:\n{e}")
+        update_status("Error al generar los gráficos.")
+
+def on_delete_simulation():
+    selected = sim_tree.selection()
+    if not selected:
+        messagebox.showwarning("Advertencia", "Seleccione una simulación para eliminarla.")
+        return
+    simulation_name = sim_tree.item(selected[0], "values")[0]
+    delete_simulation(simulation_name)
+
+def on_create_simulation():
+    update_status("Creando simulación, por favor espere...")
+    disable_all_buttons()
+    try:
+        subprocess.run(["python", "./CreateSimulation.py"], check=True)
+        update_status("Simulación creada exitosamente.")
+    except subprocess.CalledProcessError as e:
+        messagebox.showerror("Error", f"Error al crear simulación:\n{e}")
+        update_status("Error al crear simulación.")
+    finally:
+        enable_all_buttons()
+
 def show_options_window():
     options_win = tk.Toplevel(main_window)
     options_win.title("Opciones Post-Build")
@@ -486,7 +580,7 @@ def show_options_window():
     options_frame = ttk.Frame(options_win, padding=20)
     options_frame.pack(expand=True, fill="both")
     
-    info_label = ttk.Label(options_frame, text="¿Qué desea hacer ahora?", font=("Segoe UI", 14))
+    info_label = ttk.Label(options_frame, text="¿Qué desea hacer a continuación?", font=("Segoe UI", 14))
     info_label.pack(pady=10)
     
     btn_ejecutar = ttk.Button(options_frame, text="Ejecutar Build", command=open_simulation_executable)
@@ -495,8 +589,8 @@ def show_options_window():
     btn_abrir = ttk.Button(options_frame, text="Abrir en Unity", command=open_in_unity)
     btn_abrir.pack(pady=5, fill="x")
     
-    btn_nueva = ttk.Button(options_frame, text="Cargar Nueva Simulación",
-                            command=lambda: (options_win.destroy(), update_status("Esperando nueva selección...")))
+    btn_nueva = ttk.Button(options_frame, text="Cargar Otra Simulación",
+                            command=lambda: (options_win.destroy(), update_status("Seleccione otra simulación.")))
     btn_nueva.pack(pady=5, fill="x")
     
     btn_salir = ttk.Button(options_frame, text="Salir", command=main_window.destroy)
@@ -505,6 +599,7 @@ def show_options_window():
     main_x = main_window.winfo_x()
     main_y = main_window.winfo_y()
     options_win.geometry(f"+{main_x + 150}+{main_y + 150}")
+    update_status("Opciones disponibles.")
 
 populate_simulations()
 

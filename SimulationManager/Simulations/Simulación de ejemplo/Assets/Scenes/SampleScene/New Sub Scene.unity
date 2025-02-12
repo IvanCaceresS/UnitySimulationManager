@@ -261,7 +261,7 @@ TerrainCollider:
     m_Bits: 0
   m_LayerOverridePriority: 0
   m_ProvidesContacts: 0
-  m_Enabled: 1
+  m_Enabled: 0
   serializedVersion: 2
   m_TerrainData: {fileID: 0}
   m_EnableTreeColliders: 1
@@ -336,7 +336,7 @@ GameObject:
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
-  m_StaticEditorFlags: 0
+  m_StaticEditorFlags: 2147483647
   m_IsActive: 1
 --- !u!114 &752623039
 MonoBehaviour:
@@ -355,13 +355,13 @@ MonoBehaviour:
     x: -0
     y: -9.81
     z: -0
-  m_SolverIterationCount: 1
+  m_SolverIterationCount: 4
   m_EnableSolverStabilizationHeuristic: 0
   m_MultiThreaded: 1
-  m_CollisionTolerance: 0.01
-  m_SynchronizeCollisionWorld: 0
+  m_CollisionTolerance: 1e-29
+  m_SynchronizeCollisionWorld: 1
   m_IncrementalDynamicBroadphase: 0
-  m_IncrementalStaticBroadphase: 0
+  m_IncrementalStaticBroadphase: 1
 --- !u!4 &752623040
 Transform:
   m_ObjectHideFlags: 0
