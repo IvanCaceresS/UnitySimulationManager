@@ -8,7 +8,7 @@ public class Right_GUI : MonoBehaviour
     private bool showDeltaTimeWindow = true;
     private bool showControls = false;
     private string deltaTimeInput = "1.00";
-    private int[] fpsLevels = { 60, 144, 500, 1000, 10000 };
+    private int[] fpsLevels = { 60, 144, 500, 1000, -1 };
     private int currentFPSIndex = 0;
     private string initialSceneName;
     private static float LowDeltaTimeLimit = 0.01f;
