@@ -3,18 +3,15 @@ using Unity.Collections;
 using Unity.Entities;
 using Unity.Jobs;
 using Unity.Mathematics;
-using Unity.Transforms;
-using UnityEngine;
 using Unity.Physics;
 using Unity.Physics.Extensions;
-using CapsuleCollider = Unity.Physics.CapsuleCollider;
+using Unity.Transforms;
+using UnityEngine;
 
 [BurstCompile]
 [UpdateInGroup(typeof(SimulationSystemGroup))]
 public partial class SCerevisiaeSystem : SystemBase
 {
-    const float ColliderUpdateThreshold = 0.01f;
-
     protected override void OnUpdate()
     {
         // Comprobamos el estado global
@@ -56,25 +53,26 @@ public partial class SCerevisiaeSystem : SystemBase
             .WithReadOnly(parentMap)
             .ForEach((Entity entity, int entityInQueryIndex,
                       ref LocalTransform transform,
-                      ref SCerevisiaeComponent sc) =>
+                      ref SCerevisiaeComponent organism) =>
         {
-            float maxScale = sc.MaxScale;
-            sc.GrowthDuration = sc.DivisionInterval = sc.TimeReference * sc.SeparationThreshold;
+            float maxScale = organism.MaxScale;
+            // Actualizamos los tiempos de crecimiento y división.
+            organism.GrowthDuration = organism.DivisionInterval = organism.TimeReference * organism.SeparationThreshold;
 
             // --- Crecimiento ---
             if (transform.Scale < maxScale)
             {
-                sc.GrowthTime += deltaTime;
-                float t = math.clamp(sc.GrowthTime / sc.GrowthDuration, 0f, 1f);
-                float initialScale = sc.IsInitialCell ? maxScale : 0.01f;
+                organism.GrowthTime += deltaTime;
+                float t = math.clamp(organism.GrowthTime / organism.GrowthDuration, 0f, 1f);
+                float initialScale = organism.IsInitialCell ? maxScale : 0.01f;
                 transform.Scale = math.lerp(initialScale, maxScale, t);
             }
 
             // --- División ---
             if (transform.Scale >= maxScale)
             {
-                sc.TimeSinceLastDivision += deltaTime;
-                if (sc.TimeSinceLastDivision >= sc.DivisionInterval)
+                organism.TimeSinceLastDivision += deltaTime;
+                if (organism.TimeSinceLastDivision >= organism.DivisionInterval)
                 {
                     // Se genera un número aleatorio basado en entityInQueryIndex
                     Unity.Mathematics.Random rng = new Unity.Mathematics.Random((uint)(entityInQueryIndex + 1) * 99999);
@@ -87,7 +85,7 @@ public partial class SCerevisiaeSystem : SystemBase
                     LocalTransform childTransform = transform;
                     childTransform.Scale = 0.01f;
 
-                    SCerevisiaeComponent childData = sc;
+                    SCerevisiaeComponent childData = organism;
                     childData.GrowthTime = 0f;
                     childData.TimeSinceLastDivision = 0f;
                     childData.IsInitialCell = false;
@@ -100,34 +98,32 @@ public partial class SCerevisiaeSystem : SystemBase
 
                     ecb.SetComponent(entityInQueryIndex, child, childTransform);
                     ecb.SetComponent(entityInQueryIndex, child, childData);
-                    sc.TimeSinceLastDivision = 0f;
+                    organism.TimeSinceLastDivision = 0f;
                 }
             }
 
             // --- Anclaje ---
-            if (!sc.IsInitialCell && sc.Parent != Entity.Null &&
-                parentMap.TryGetValue(sc.Parent, out ParentData parentData))
+            if (!organism.IsInitialCell && organism.Parent != Entity.Null &&
+                parentMap.TryGetValue(organism.Parent, out ParentData parentData))
             {
-                if (transform.Scale < sc.SeparationThreshold * maxScale)
+                if (transform.Scale < organism.SeparationThreshold * maxScale)
                 {
-                    float ratio = math.clamp(transform.Scale / (sc.SeparationThreshold * maxScale), 0f, 1f);
+                    float ratio = math.clamp(transform.Scale / (organism.SeparationThreshold * maxScale), 0f, 1f);
                     float offset = (parentData.Scale * 0.5f) * ratio;
-                    // Convertir la dirección de crecimiento, definida en el espacio local del padre,
-                    // a dirección en el espacio mundial utilizando la rotación del padre.
-                    float3 worldDir = math.mul(parentData.Rotation, sc.GrowthDirection);
+                    float3 worldDir = math.mul(parentData.Rotation, organism.GrowthDirection);
                     transform.Position = parentData.Position + worldDir * offset;
                     transform.Rotation = parentData.Rotation;
                 }
                 else
                 {
                     // Una vez que el hijo alcanza o supera el umbral, se separa del padre.
-                    sc.Parent = Entity.Null;
+                    organism.Parent = Entity.Null;
                 }
             }
 
             // Actualizar componentes mediante el ECB.
             ecb.SetComponent(entityInQueryIndex, entity, transform);
-            ecb.SetComponent(entityInQueryIndex, entity, sc);
+            ecb.SetComponent(entityInQueryIndex, entity, organism);
         }).ScheduleParallel(Dependency);
         ecbSystem.AddJobHandleForProducer(Dependency);
 
