@@ -1,3 +1,4 @@
+import sys
 import os
 import shutil
 import subprocess
@@ -95,7 +96,7 @@ def on_create_simulation():
     update_status("Creando simulación, por favor espere...")
     disable_all_buttons()
     try:
-        subprocess.run(["python", "./CreateSimulation.py"], check=True)
+        subprocess.run(["python", "./Scripts/CreateSimulation.py"], check=True)
         update_status("Simulación creada exitosamente.")
     except subprocess.CalledProcessError as e:
         messagebox.showerror("Error", f"Error al crear simulación:\n{e}")
@@ -554,7 +555,7 @@ def on_show_graphs():
         update_status("Error: Script de gráficos no encontrado.")
         return
     try:
-        subprocess.Popen(["python", simulation_graphics_path, simulation_name])
+        subprocess.Popen([sys.executable, simulation_graphics_path, simulation_name])
         update_status("Los gráficos se están generando. Revise la carpeta correspondiente en Documents.")
         open_graphs_folder(simulation_name)
     except Exception as e:
