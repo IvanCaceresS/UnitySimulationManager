@@ -1,1 +1,0 @@
-print("ESTE ES EL ARCHIVO CreateSimulation.py donde se realiza la comunicación con la API")

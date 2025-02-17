@@ -7,6 +7,7 @@ import threading
 import time
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
+from tkinter.simpledialog import askstring
 from dotenv import load_dotenv
 from pathlib import Path
 
@@ -47,8 +48,6 @@ if required_version not in UNITY_EXECUTABLE:
 SIMULATIONS_DIR = "./Simulations"
 SIMULATION_PROJECT_NAME = "Simulacion"
 SIMULATION_PROJECT_PATH = os.path.join(UNITY_PROJECTS_PATH, SIMULATION_PROJECT_NAME)
-# El archivo simulation_loaded.txt se guardará en:
-# SIMULATION_PROJECT_PATH/Assets/StreamingAssets/simulation_loaded.txt
 ASSETS_FOLDER = os.path.join(SIMULATION_PROJECT_PATH, "Assets")
 STREAMING_ASSETS_FOLDER = os.path.join(ASSETS_FOLDER, "StreamingAssets")
 SIMULATION_LOADED_FILE = os.path.join(STREAMING_ASSETS_FOLDER, "simulation_loaded.txt")
@@ -90,14 +89,31 @@ def enable_all_buttons():
     create_btn.config(state="normal")
 
 # ======================================================
-# Función para crear simulación (llama a CreateSimulation.py)
+# Función para crear simulación (llama a api_manager.py)
 # ======================================================
 def on_create_simulation():
+    # Pedir en el hilo principal el nombre de la simulación...
+    simulation_name = askstring("Crear Simulación", "Ingrese el nombre de la simulación:")
+    if not simulation_name:
+        update_status("Creación de simulación cancelada.")
+        return
+    # ... y la descripción de la simulación (la pregunta para la API)
+    simulation_description = askstring("Descripción de la Simulación", "Describe la simulación:")
+    if not simulation_description:
+        update_status("Creación de simulación cancelada. Se requiere una descripción.")
+        return
+    # Lanza la tarea en un hilo separado
+    threading.Thread(target=create_simulation, args=(simulation_name, simulation_description), daemon=True).start()
+
+def create_simulation(simulation_name, simulation_description):
     update_status("Creando simulación, por favor espere...")
     disable_all_buttons()
     try:
-        subprocess.run(["python", "./Scripts/CreateSimulation.py"], check=True)
+        # Se pasa el nombre y la descripción a api_manager.py
+        subprocess.run(["python", "./Scripts/api_manager.py", simulation_name, simulation_description], check=True)
         update_status("Simulación creada exitosamente.")
+        messagebox.showinfo("Éxito", "Simulación creada exitosamente.")
+        populate_simulations()  # Refrescar la lista de simulaciones
     except subprocess.CalledProcessError as e:
         messagebox.showerror("Error", f"Error al crear simulación:\n{e}")
         update_status("Error al crear simulación.")
@@ -216,14 +232,12 @@ def load_simulation(simulation_name, first_time=True):
         dst_assets = os.path.join(SIMULATION_PROJECT_PATH, "Assets")
         copy_directory(src_assets, dst_assets)
     update_last_opened(simulation_name)
-    # Asegurarse de que la carpeta StreamingAssets exista (después de copiar Assets)
     if not os.path.exists(STREAMING_ASSETS_FOLDER):
         try:
             os.makedirs(STREAMING_ASSETS_FOLDER, exist_ok=True)
         except Exception as e:
             messagebox.showerror("Error", f"No se pudo crear la carpeta StreamingAssets:\n{e}")
             return False
-    # Escribir simulation_loaded.txt en StreamingAssets
     try:
         with open(SIMULATION_LOADED_FILE, "w") as f:
             f.write(simulation_name)
@@ -347,7 +361,6 @@ def delete_simulation(simulation_name):
         update_status("Eliminación cancelada.")
         return
 
-    # Eliminar carpeta en SIMULATIONS_DIR
     sim_path = os.path.join(SIMULATIONS_DIR, simulation_name)
     if os.path.exists(sim_path):
         try:
@@ -355,7 +368,6 @@ def delete_simulation(simulation_name):
         except Exception as e:
             messagebox.showerror("Error", f"No se pudo eliminar la carpeta de la simulación en {sim_path}:\n{e}")
             return
-    # Eliminar carpeta de datos en Documents/SimulationLoggerData
     documents_path = Path.home() / "Documents"
     data_path = documents_path / "SimulationLoggerData" / simulation_name
     if data_path.exists():
@@ -376,19 +388,18 @@ main_window.title("Gestor de Simulaciones de Unity")
 main_window.geometry("700x500")
 main_window.resizable(False, False)
 
-# Configuración de estilos personalizados para botones
 style = ttk.Style(main_window)
 style.theme_use("clam")
 style.configure("TButton", font=("Segoe UI", 10))
-style.configure("Info.TButton", foreground="white", background="#5B6EE1")      # Azul (Cargar simulación)
+style.configure("Info.TButton", foreground="white", background="#5B6EE1")
 style.map("Info.TButton", background=[("active", "#4759c7")])
-style.configure("Success.TButton", foreground="white", background="#4CAF50")   # Verde (Crear simulación)
+style.configure("Success.TButton", foreground="white", background="#4CAF50")
 style.map("Success.TButton", background=[("active", "#43A047")])
-style.configure("Danger.TButton", foreground="white", background="#F44336")    # Rojo (Eliminar simulación)
+style.configure("Danger.TButton", foreground="white", background="#F44336")
 style.map("Danger.TButton", background=[("active", "#E53935")])
-style.configure("Graph.TButton", foreground="white", background="#009688")     # Teal (Mostrar gráficos)
+style.configure("Graph.TButton", foreground="white", background="#009688")
 style.map("Graph.TButton", background=[("active", "#00796B")])
-style.configure("Reload.TButton", foreground="white", background="#9C27B0")    # Morado (Recargar lista)
+style.configure("Reload.TButton", foreground="white", background="#9C27B0")
 style.map("Reload.TButton", background=[("active", "#7B1FA2")])
 
 menubar = tk.Menu(main_window)
@@ -466,7 +477,7 @@ delete_btn = ttk.Button(button_frame, text="Eliminar Simulación", style="Danger
 delete_btn.pack(side="left", padx=5)
 
 create_btn = ttk.Button(button_frame, text="Crear Simulación", style="Success.TButton",
-                          command=lambda: threading.Thread(target=on_create_simulation, daemon=True).start())
+                          command=on_create_simulation)
 create_btn.pack(side="left", padx=5)
 
 status_frame = ttk.Frame(main_window)
@@ -539,7 +550,6 @@ def on_show_graphs():
     simulation_name = sim_tree.item(selected[0], "values")[0]
     update_status("Generando gráficos, por favor espere...")
     
-    # Verificar que exista el CSV en My Documents\SimulationLoggerData\<simulationName>\SimulationStats.csv
     documents_path = Path.home() / "Documents"
     csv_path = documents_path / "SimulationLoggerData" / simulation_name / "SimulationStats.csv"
     if not csv_path.exists():
@@ -547,8 +557,6 @@ def on_show_graphs():
         update_status(f"[Error] No se encontró el archivo CSV en: {csv_path}")
         return
     
-    # Ruta al script de gráficos:
-    # ./Simulations/<simulationName>/Assets/Scripts/SimulationData/SimulationGraphics.py
     simulation_graphics_path = os.path.join(SIMULATIONS_DIR, simulation_name, "Assets", "Scripts", "SimulationData", "SimulationGraphics.py")
     if not os.path.exists(simulation_graphics_path):
         messagebox.showerror("Error", f"No se encontró el script de gráficos en:\n{simulation_graphics_path}")
