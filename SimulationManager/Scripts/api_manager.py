@@ -90,7 +90,7 @@ def main():
         print(f"La simulación '{simulation_name}' ya existe. Elija otro nombre.")
         sys.exit(1)
 
-    print("ESTE ES EL ARCHIVO api_manager.py")
+    #print("ESTE ES EL ARCHIVO api_manager.py")
     print(f"Procesando simulación: {simulation_name}")
     print(f"Pregunta: {pregunta}")
 

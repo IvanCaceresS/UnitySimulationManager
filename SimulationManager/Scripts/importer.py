@@ -10,7 +10,7 @@ def import_codes(codes: dict, simulation_name: str):
 
     Reglas:
       - Se copia la carpeta Template (con "Assets", "Packages" y "ProjectSettings") a:
-            ../Simulations/<simulation_name>
+            ./Simulations/<simulation_name>
       - En Assets/Editor se crea "PrefabMaterialCreator.cs" con:
             #if UNITY_EDITOR 
             using UnityEngine;
@@ -19,11 +19,15 @@ def import_codes(codes: dict, simulation_name: str):
             <código recibido>
             #endif
       - En Assets/Scripts/Components se colocan los archivos cuyo nombre contenga "Component.cs".
-      - En Assets/Scripts/Systems se colocan los archivos cuyo nombre contenga "System.cs".
+      - En Assets/Scripts/Systems se colocan los archivos cuyo nombre contenga "System.cs". Para cada
+        uno se carga el template ubicado en:
+            Template/Assets/Scripts/Systems/GeneralSystem.cs
+        se reemplaza la declaración de clase "GeneralSystem" por el nombre correspondiente (ej. "EColiSystem")
+        y se inserta el código recibido (proporcionado por la API) inmediatamente después de la línea que contiene:
+            var ecb = ecbSystem.CreateCommandBuffer().AsParallelWriter();
       - En Assets/Scripts/General se coloca "CreatePrefabsOnClick.cs". Para este archivo se toma el template ubicado en
-            ../Template/Assets/Scripts/General/CreatePrefabsOnClick.cs
-        y se inserta el código recibido justo después de la línea que contenga la carga de prefabs (se busca que en esa línea aparezcan
-        tanto "private void CargarPrefabs()" como "Resources.LoadAll<GameObject>").
+            Template/Assets/Scripts/General/CreatePrefabsOnClick.cs
+        y se inserta el código recibido luego de la línea que contenga "private void CargarPrefabs()" y "Resources.LoadAll<GameObject>".
       - El resto de archivos se colocan en la raíz de la simulación.
       
     Se garantiza que, aun cuando las carpetas "Systems" y "Components" (o cualquier otra ruta de destino)
@@ -60,6 +64,9 @@ def import_codes(codes: dict, simulation_name: str):
     assets_scripts_general = os.path.join(simulation_folder, "Assets", "Scripts", "General")
     os.makedirs(assets_scripts_general, exist_ok=True)
 
+    # Ruta al template para sistemas
+    template_system_path = os.path.join(template_folder, "Assets", "Scripts", "Systems", "GeneralSystem.cs")
+
     # Procesar cada archivo recibido en el diccionario
     for file_name, content in codes.items():
         # Determinar ruta destino y contenido final según el tipo de archivo
@@ -79,9 +86,34 @@ def import_codes(codes: dict, simulation_name: str):
             dest_path = os.path.join(assets_scripts_components, file_name)
             new_content = content
         elif "System.cs" in file_name:
-            # Se colocan en Assets/Scripts/Systems
+            # Para los archivos de sistema, basarse en el template GeneralSystem.cs
             dest_path = os.path.join(assets_scripts_systems, file_name)
-            new_content = content
+            try:
+                with open(template_system_path, "r", encoding="utf-8") as f:
+                    template_lines = f.readlines()
+            except Exception as e:
+                print(f"Error al leer el template de sistemas: {e}")
+                continue
+
+            # Reemplazar la declaración de clase
+            class_declaration = "public partial class GeneralSystem : SystemBase"
+            new_class_declaration = f"public partial class {file_name.replace('.cs','')} : SystemBase"
+            template_lines = [line.replace(class_declaration, new_class_declaration) for line in template_lines]
+
+            # Buscar la línea donde se crea el ParallelWriter (placeholder para insertar el código)
+            insertion_index = None
+            for i, line in enumerate(template_lines):
+                if "var ecb = ecbSystem.CreateCommandBuffer().AsParallelWriter();" in line:
+                    insertion_index = i
+                    break
+
+            if insertion_index is not None:
+                # Insertar el código recibido justo después de la línea encontrada
+                template_lines.insert(insertion_index + 1, content + "\n")
+                new_content = "".join(template_lines)
+            else:
+                print(f"No se encontró la línea de inserción en el template de sistemas para {file_name}. Se usará el contenido recibido directamente.")
+                new_content = content
         elif file_name == "CreatePrefabsOnClick.cs":
             # Se coloca en Assets/Scripts/General
             dest_path = os.path.join(assets_scripts_general, "CreatePrefabsOnClick.cs")
@@ -94,7 +126,6 @@ def import_codes(codes: dict, simulation_name: str):
                 print(f"Error al leer el template de CreatePrefabsOnClick.cs: {e}")
                 continue
 
-            # Buscar la línea de inserción: aquella que contenga "private void CargarPrefabs()" y "Resources.LoadAll<GameObject>"
             insertion_index = None
             for i, line in enumerate(template_lines):
                 if "private void CargarPrefabs()" in line and "Resources.LoadAll<GameObject>" in line:
@@ -102,7 +133,6 @@ def import_codes(codes: dict, simulation_name: str):
                     break
 
             if insertion_index is not None:
-                # Insertar el código recibido justo después de esa línea
                 template_lines.insert(insertion_index + 1, content + "\n")
                 new_content = "".join(template_lines)
             else:
@@ -123,6 +153,15 @@ def import_codes(codes: dict, simulation_name: str):
             print(f"Archivo '{file_name}' creado en {dest_dir}")
         except Exception as e:
             print(f"Error al escribir el archivo {file_name}: {e}")
+
+    # Finalmente, eliminar el template de sistemas (GeneralSystem.cs) de la copia, si existe
+    template_system_dest = os.path.join(assets_scripts_systems, "GeneralSystem.cs")
+    if os.path.exists(template_system_dest):
+        try:
+            os.remove(template_system_dest)
+            print("Archivo 'GeneralSystem.cs' eliminado de la simulación.")
+        except Exception as e:
+            print(f"Error al eliminar 'GeneralSystem.cs': {e}")
 
 def main():
     """

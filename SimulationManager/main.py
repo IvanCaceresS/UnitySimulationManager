@@ -110,7 +110,7 @@ def create_simulation(simulation_name, simulation_description):
     disable_all_buttons()
     try:
         # Se pasa el nombre y la descripción a api_manager.py
-        subprocess.run(["python", "./Scripts/api_manager.py", simulation_name, simulation_description], check=True)
+        subprocess.run([sys.executable, "./Scripts/api_manager.py", simulation_name, simulation_description], check=True)
         update_status("Simulación creada exitosamente.")
         messagebox.showinfo("Éxito", "Simulación creada exitosamente.")
         populate_simulations()  # Refrescar la lista de simulaciones
