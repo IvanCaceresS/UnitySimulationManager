@@ -91,8 +91,6 @@ Dependency=Entities.WithReadOnly(parentMap).ForEach((Entity entity,int entityInQ
         }
         else organism.Parent=Entity.Null;
     }
-}
-);
 
 
             // Actualizar componentes mediante el ECB.

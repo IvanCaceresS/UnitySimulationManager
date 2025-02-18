@@ -6,7 +6,7 @@ import api  # Importa el módulo que llama a la API de OpenAI
 
 # Usamos el separador especial
 DELIMITER = "%|%"
-RESPONSES_CSV = os.path.join("..", "Responses", "Responses.csv")
+RESPONSES_CSV = os.path.join(".", "Responses", "Responses.csv")
 
 def get_next_id(csv_path: str) -> int:
     if not os.path.exists(csv_path):
@@ -26,7 +26,7 @@ def get_next_id(csv_path: str) -> int:
     return 1
 
 def write_response_to_csv(pregunta: str, respuesta: str, input_tokens: int, output_tokens: int):
-    responses_folder = os.path.join("..", "Responses")
+    responses_folder = os.path.join(".", "Responses")
     os.makedirs(responses_folder, exist_ok=True)
     
     write_header = not os.path.exists(RESPONSES_CSV)
