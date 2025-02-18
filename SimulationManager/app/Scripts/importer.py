@@ -23,8 +23,10 @@ def import_codes(codes: dict, simulation_name: str):
         uno se carga el template ubicado en:
             Template/Assets/Scripts/Systems/GeneralSystem.cs
         se reemplaza la declaración de clase "GeneralSystem" por el nombre correspondiente (ej. "EColiSystem")
-        y se inserta el código recibido (proporcionado por la API) inmediatamente después de la línea que contiene:
-            var ecb = ecbSystem.CreateCommandBuffer().AsParallelWriter();
+        y se reemplaza en ese mismo archivo cualquier ocurrencia de "GeneralComponent" por "EColiComponent"
+        (suponiendo que el archivo se llame "EColiSystem.cs") y se inserta el código recibido (proporcionado por la API)
+        inmediatamente después de la línea que contiene:
+            transform.Scale=math.lerp(initialScale,maxScale,t);}
       - En Assets/Scripts/General se coloca "CreatePrefabsOnClick.cs". Para este archivo se toma el template ubicado en
             Template/Assets/Scripts/General/CreatePrefabsOnClick.cs
         y se inserta el código recibido luego de la línea que contenga "private void CargarPrefabs()" y "Resources.LoadAll<GameObject>".
@@ -95,15 +97,23 @@ def import_codes(codes: dict, simulation_name: str):
                 print(f"Error al leer el template de sistemas: {e}")
                 continue
 
-            # Reemplazar la declaración de clase
-            class_declaration = "public partial class GeneralSystem : SystemBase"
-            new_class_declaration = f"public partial class {file_name.replace('.cs','')} : SystemBase"
-            template_lines = [line.replace(class_declaration, new_class_declaration) for line in template_lines]
+            # Extraer el nombre del organismo (se asume que el archivo sigue el formato "XSystem.cs")
+            organism_name = file_name.replace("System.cs", "")
+            # Construir las nuevas declaraciones para la clase y componente
+            new_class_declaration = f"public partial class {organism_name}System : SystemBase"
+            new_component_declaration = f"{organism_name}Component"
+            
+            # Reemplazar tanto "GeneralSystem" como "GeneralComponent" en todas las líneas del template
+            template_lines = [
+                line.replace("public partial class GeneralSystem : SystemBase", new_class_declaration)
+                    .replace("GeneralComponent", new_component_declaration)
+                for line in template_lines
+            ]
 
-            # Buscar la línea donde se crea el ParallelWriter (placeholder para insertar el código)
+            # Buscar la línea de inserción (placeholder)
             insertion_index = None
             for i, line in enumerate(template_lines):
-                if "var ecb = ecbSystem.CreateCommandBuffer().AsParallelWriter();" in line:
+                if "transform.Scale=math.lerp(initialScale,maxScale,t);}" in line:
                     insertion_index = i
                     break
 

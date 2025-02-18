@@ -10,7 +10,7 @@ using UnityEngine;
 
 [BurstCompile]
 [UpdateInGroup(typeof(SimulationSystemGroup))]
-public partial class GeneralSystem : SystemBase
+public partial class SCerevisiaeSystem : SystemBase
 {
     protected override void OnUpdate()
     {
@@ -45,7 +45,7 @@ public partial class GeneralSystem : SystemBase
         EndSimulationEntityCommandBufferSystem ecbSystem =
             World.GetOrCreateSystemManaged<EndSimulationEntityCommandBufferSystem>();
         var ecb = ecbSystem.CreateCommandBuffer().AsParallelWriter();
-        Dependency=Entities.WithReadOnly(parentMap).ForEach((Entity entity,int entityInQueryIndex,ref LocalTransform transform,ref GeneralComponent organism)=>
+        Dependency=Entities.WithReadOnly(parentMap).ForEach((Entity entity,int entityInQueryIndex,ref LocalTransform transform,ref SCerevisiaeComponent organism)=>
         {
             float maxScale=organism.MaxScale;
             organism.GrowthDuration=organism.DivisionInterval=organism.TimeReference*organism.SeparationThreshold;
@@ -55,6 +55,41 @@ public partial class GeneralSystem : SystemBase
                 float t=math.clamp(organism.GrowthTime/organism.GrowthDuration,0f,1f);
                 float initialScale=organism.IsInitialCell?maxScale:0.01f;
                 transform.Scale=math.lerp(initialScale,maxScale,t);}
+if(transform.Scale>=maxScale)
+{
+    organism.TimeSinceLastDivision+=deltaTime;
+    if(organism.TimeSinceLastDivision>=organism.DivisionInterval)
+    {
+        Unity.Mathematics.Random rng=new Unity.Mathematics.Random((uint)(entityInQueryIndex+1)*99999);
+        float angle=rng.NextFloat(0f,math.PI*2f);
+        float3 rnd=new float3(math.cos(angle),math.sin(angle),0f);
+        Entity child=ecb.Instantiate(entityInQueryIndex,entity);
+        LocalTransform ct=transform;
+        ct.Scale=0.01f;
+        SCerevisiaeComponent cd=organism;
+        cd.GrowthTime=0f;
+        cd.TimeSinceLastDivision=0f;
+        cd.IsInitialCell=false;
+        cd.Parent=entity;
+        cd.GrowthDirection=rnd;
+        ct.Position=transform.Position;
+        ecb.SetComponent(entityInQueryIndex,child,ct);
+        ecb.SetComponent(entityInQueryIndex,child,cd);
+        organism.TimeSinceLastDivision=0f;
+    }
+}
+if(!organism.IsInitialCell && organism.Parent!=Entity.Null && parentMap.TryGetValue(organism.Parent,out ParentData pd))
+{
+    if(transform.Scale<organism.SeparationThreshold*maxScale)
+    {
+        float r=math.clamp(transform.Scale/(organism.SeparationThreshold*maxScale),0f,1f);
+        float off=(pd.Scale*0.5f)*r;
+        float3 wd=math.mul(pd.Rotation,organism.GrowthDirection);
+        transform.Position=pd.Position+wd*off;
+        transform.Rotation=pd.Rotation;
+    }
+    else organism.Parent=Entity.Null;
+}
 
 
 
