@@ -225,7 +225,7 @@ public class Left_GUI : MonoBehaviour
         y += GUIFontSize;
         GUI.Label(new Rect(GUIXPosition, y, GUIWidth, GUIHeight), $"Tiempo Simulado: {FormatTime(cachedSimulatedTime)}.", labelStyle);
         y += GUIFontSize;
-        GUI.Label(new Rect(GUIXPosition, y, GUIWidth, GUIHeight), $"Multiplicador de tiempo: {(GameStateManager.DeltaTime * cachedFPS):F0} x Tiempo Real.", labelStyle);
+        GUI.Label(new Rect(GUIXPosition, y, GUIWidth, GUIHeight), $"Multiplicador de tiempo: {(GameStateManager.DeltaTime * cachedFPS):F2} x Tiempo Real.", labelStyle);
         y += GUIFontSize;
         GUI.Label(new Rect(GUIXPosition, y, GUIWidth, GUIHeight), $"DeltaTime: {GameStateManager.DeltaTime:F2}.", labelStyle);
         y += GUIFontSize;
