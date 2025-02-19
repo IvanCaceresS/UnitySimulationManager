@@ -10,7 +10,6 @@ using UnityEngine.UI;
 using System.Collections;
 using System.Collections.Generic;
 
-// Alias para DOTS Physics.Material (evita conflicto con UnityEngine.Material)
 using Material = Unity.Physics.Material;
 
 public class CreatePrefabsOnClick : MonoBehaviour
@@ -45,7 +44,6 @@ public class CreatePrefabsOnClick : MonoBehaviour
 
         Debug.Log($"Se encontraron {prefabs.Count} prefabs.");
 
-        // Query para ECS prefabs (PrefabEntityComponent)
         spawnerQuery = entityManager.CreateEntityQuery(typeof(PrefabEntityComponent));
 
         SolicitarColocacion();
@@ -55,7 +53,6 @@ public class CreatePrefabsOnClick : MonoBehaviour
     {
         if (isWaitingForClick && Input.GetMouseButtonDown(0))
         {
-            // Desambiguamos Ray y RaycastHit (UnityEngine.*)
             UnityEngine.Ray ray = mainCamera.ScreenPointToRay(Input.mousePosition);
             if (UnityEngine.Physics.Raycast(ray, out UnityEngine.RaycastHit hit))
             {
@@ -74,188 +71,105 @@ public class CreatePrefabsOnClick : MonoBehaviour
         }
     }
 
-    private void CargarPrefabs()
+    private void CargarPrefabs(){prefabs = new List<GameObject>(Resources.LoadAll<GameObject>("Prefabs"));}
+private void CrearEntidad(Vector3 p)
+{
+    if(currentPrefabIndex>=prefabs.Count)return;
+    var sQ=spawnerQuery.ToEntityArray(Allocator.Temp);
+    if(currentPrefabIndex>=sQ.Length)
     {
-        // Cargar los prefabs de Resources/Prefabs
-        prefabs = new List<GameObject>(Resources.LoadAll<GameObject>("Prefabs"));
+        Debug.LogError($"No se encontró spawner en índice {currentPrefabIndex}");
+        sQ.Dispose();
+        return;
     }
-
-    private void CrearEntidad(Vector3 position)
+    Entity s=sQ[currentPrefabIndex];
+    sQ.Dispose();
+    Entity pe=entityManager.GetComponentData<PrefabEntityComponent>(s).prefab;
+    Entity e=entityManager.Instantiate(pe);
+    float os=entityManager.GetComponentData<LocalTransform>(pe).Scale;
+    quaternion or=entityManager.GetComponentData<LocalTransform>(pe).Rotation;
+    float ry=UnityEngine.Random.Range(0f,360f);
+    quaternion nr=math.mul(or,quaternion.RotateY(math.radians(ry)));
+    float h=os*.5f;
+    float3 ap=new float3(p.x,math.max(p.y+h,h),p.z);
+    entityManager.SetComponentData(e,new LocalTransform
     {
-        if (currentPrefabIndex >= prefabs.Count) return;
-
-        NativeArray<Entity> spawnerEntities = spawnerQuery.ToEntityArray(Allocator.Temp);
-        if (currentPrefabIndex >= spawnerEntities.Length)
+        Position=ap,Rotation=nr,Scale=os
+    }
+    );
+    string n=prefabs[currentPrefabIndex].name;
+    switch(n)
+    {
+        case"EColi":entityManager.AddComponentData(e,new EColiComponent
         {
-            Debug.LogError($"No se encontró spawner en índice {currentPrefabIndex}");
-            spawnerEntities.Dispose();
-            return;
+            TimeReference=1200f,SeparationThreshold=0.7f,MaxScale=1f,GrowthTime=0f,GrowthDuration=1200f*0.7f,TimeSinceLastDivision=0f,DivisionInterval=1200f*0.7f,HasGeneratedChild=false,Parent=Entity.Null,IsInitialCell=true,SeparationSign=0
         }
-
-        // Instanciamos el prefab ECS
-        Entity spawner = spawnerEntities[currentPrefabIndex];
-        spawnerEntities.Dispose();
-
-        Entity prefabEntity = entityManager.GetComponentData<PrefabEntityComponent>(spawner).prefab;
-        Entity entity       = entityManager.Instantiate(prefabEntity);
-
-        float originalScale = entityManager.GetComponentData<LocalTransform>(prefabEntity).Scale;
-        quaternion originalRotation = entityManager.GetComponentData<LocalTransform>(prefabEntity).Rotation;
-
-        // Rotación aleatoria Y => UnityEngine.Random
-        float randYRot = UnityEngine.Random.Range(0f, 360f);
-        quaternion newRotation = math.mul(originalRotation, quaternion.RotateY(math.radians(randYRot)));
-
-        // Ajustar posición en Y para no enterrar
-        float heightOffset = originalScale * 0.5f;
-        float3 adjustedPosition = new float3(
-            position.x,
-            math.max(position.y + heightOffset, heightOffset),
-            position.z
         );
-
-        entityManager.SetComponentData(entity, new LocalTransform
+        break;
+        case"SCerevisiae":entityManager.AddComponentData(e,new SCerevisiaeComponent
         {
-            Position = adjustedPosition,
-            Rotation = newRotation,
-            Scale    = originalScale
-        });
-
-        string prefabName = prefabs[currentPrefabIndex].name;
-        switch (prefabName)
-        {
-            case "Cube":
-                entityManager.AddComponentData(entity, new CubeComponent());
-                break;
-
-            case "EColi":
-                entityManager.AddComponentData(entity, new EColiComponent
-                {
-                    TimeReference         = 1200f, // Ej: 20 minutos
-                    SeparationThreshold   = 0.7f,
-                    MaxScale              = 1.0f,
-
-                    GrowthTime            = 0f,
-                    GrowthDuration        = 1200f * 0.7f,
-                    TimeSinceLastDivision = 0f,
-                    DivisionInterval      = 1200f * 0.7f,
-                    HasGeneratedChild     = false,
-
-                    Parent                = Entity.Null,
-                    IsInitialCell         = true,
-                    SeparationSign        = 0
-                });
-                break;
-
-            case "SCerevisiae":
-                // SCerevisiae => 5400f => 90 min
-                entityManager.AddComponentData(entity, new SCerevisiaeComponent
-                {
-                    TimeReference         = 5400f, // 90 min
-                    SeparationThreshold   = 0.7f,
-                    MaxScale              = 5.0f,
-
-                    GrowthTime            = 0f,
-                    GrowthDuration        = 5400f * 0.7f,
-                    TimeSinceLastDivision = 0f,
-                    DivisionInterval      = 5400f * 0.7f,
-                    HasGeneratedChild     = false,
-
-                    Parent                = Entity.Null,
-                    IsInitialCell         = true,
-                    SeparationSign        = 0
-                });
-                break;
-
-            default:
-                Debug.LogWarning($"No hay componente ECS para '{prefabName}'");
-                break;
+            TimeReference=5400f,SeparationThreshold=0.7f,MaxScale=5f,GrowthTime=0f,GrowthDuration=5400f*0.7f,TimeSinceLastDivision=0f,DivisionInterval=5400f*0.7f,HasGeneratedChild=false,Parent=Entity.Null,IsInitialCell=true,SeparationSign=0
         }
-
-        // Añadimos física
-        AddPhysicsComponents(entity, prefabName, originalScale);
-        Debug.Log($"Entidad '{prefabName}' creada en {adjustedPosition}");
+        );
+        break;
+        default:Debug.LogWarning($"No hay componente ECS para '{n}'");
+        break;
     }
-
-    private void AddPhysicsComponents(Entity entity, string prefabName, float scale)
+    AddPhysicsComponents(e,n,os);
+    Debug.Log($"Entidad '{n}' creada en {ap}");
+}
+private void AddPhysicsComponents(Entity e,string n,float s)
+{
+    BlobAssetReference<Unity.Physics.Collider>c=default;
+    Material m=new Material
     {
-        BlobAssetReference<Unity.Physics.Collider> collider = default;
-        Material mat = new Material
-        {
-            Friction    = 8f,
-            Restitution = 0f
-        };
-
-        switch (prefabName)
-        {
-            case "Cube":
-                collider = Unity.Physics.BoxCollider.Create(
-                    new BoxGeometry
-                    {
-                        Center      = float3.zero,
-                        Orientation = quaternion.identity,
-                        Size        = new float3(scale, scale, scale),
-                        BevelRadius = 0.05f
-                    },
-                    CollisionFilter.Default,
-                    mat
-                );
-                break;
-
-            case "EColi":
-                collider = Unity.Physics.CapsuleCollider.Create(
-                    new CapsuleGeometry
-                    {
-                        Vertex0 = new float3(0, -scale, 0),
-                        Vertex1 = new float3(0,  scale, 0),
-                        Radius  = 0.25f
-                    },
-                    CollisionFilter.Default,
-                    mat
-                );
-                break;
-
-            case "SCerevisiae":
-                collider = Unity.Physics.SphereCollider.Create(
-                    new SphereGeometry
-                    {
-                        Center = float3.zero,
-                        Radius = scale * 0.1f
-                    },
-                    CollisionFilter.Default,
-                    mat
-                );
-                break;
-
-            default:
-                Debug.LogWarning($"No collider para '{prefabName}'");
-                return;
-        }
-
-        entityManager.AddComponentData(entity, new PhysicsCollider { Value = collider });
-
-        if (collider.IsCreated)
-        {
-            var massProps = collider.Value.MassProperties;
-            entityManager.AddComponentData(entity, PhysicsMass.CreateDynamic(massProps, 1f));
-        }
-
-        entityManager.AddComponentData(entity, new PhysicsVelocity
-        {
-            Linear  = float3.zero,
-            Angular = float3.zero
-        });
-
-        entityManager.AddComponentData(entity, new PhysicsGravityFactor { Value = 1f });
-
-        entityManager.AddComponentData(entity, new PhysicsDamping
-        {
-            Linear  = 0f,
-            Angular = 50f
-        });
-
-        Debug.Log($"Física añadida a '{prefabName}' (fricción alta, damping angular)");
+        Friction=8f,Restitution=0f
     }
+    ;
+    switch(n)
+    {
+        case"EColi":c=Unity.Physics.CapsuleCollider.Create(new CapsuleGeometry
+        {
+            Vertex0=new float3(0,-s,0),Vertex1=new float3(0,s,0),Radius=0.25f
+        }
+        ,CollisionFilter.Default,m);
+        break;
+        case"SCerevisiae":c=Unity.Physics.SphereCollider.Create(new SphereGeometry
+        {
+            Center=float3.zero,Radius=s*0.1f
+        }
+        ,CollisionFilter.Default,m);
+        break;
+        default:Debug.LogWarning($"No collider para '{n}'");
+        return;
+    }
+    entityManager.AddComponentData(e,new PhysicsCollider
+    {
+        Value=c
+    }
+    );
+    if(c.IsCreated)
+    {
+        var mp=c.Value.MassProperties;
+        entityManager.AddComponentData(e,PhysicsMass.CreateDynamic(mp,1f));
+    }
+    entityManager.AddComponentData(e,new PhysicsVelocity
+    {
+        Linear=float3.zero,Angular=float3.zero
+    }
+    );
+    entityManager.AddComponentData(e,new PhysicsGravityFactor
+    {
+        Value=1f
+    }
+    );
+    entityManager.AddComponentData(e,new PhysicsDamping
+    {
+        Linear=0f,Angular=50f
+    }
+    );
+    Debug.Log($"Física añadida a '{n}' (fricción alta, damping angular)");
+}
 
     private void SolicitarColocacion()
     {

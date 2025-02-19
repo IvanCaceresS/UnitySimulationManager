@@ -18,6 +18,7 @@ public static class PrefabMaterialCreator
             Debug.Log("Carpeta creada: "+mF);
         }
         CPAM("SCerevisiae",PrimitiveType.Sphere,new Vector3(5,5,5),new Vector3(90,0,0),0);
+        CPAM("EColi",PrimitiveType.Capsule,new Vector3(.5f,2,0.5f),new Vector3(90,0,0),1);
         AssetDatabase.SaveAssets();
         AssetDatabase.Refresh();
         Debug.Log("Prefabs y materiales creados.");
@@ -31,6 +32,7 @@ public static class PrefabMaterialCreator
         var col=o.GetComponent<Collider>();
         if(col!=null)Object.DestroyImmediate(col);
         if(c==0)o.AddComponent<SphereCollider>();
+        else o.AddComponent<CapsuleCollider>();
         var sh=Shader.Find("Universal Render Pipeline/Lit");
         if(sh==null)
         {
@@ -38,7 +40,7 @@ public static class PrefabMaterialCreator
             return;
         }
         var m=new Material(sh);
-        m.color=new Color(0.5f,0,0.5f,1);
+        m.color=n=="SCerevisiae"?new Color(0,0,1,1):n=="EColi"?new Color(0,1,0,1):Color.white;
         AssetDatabase.CreateAsset(m,Path.Combine(mF,n+".mat"));
         AssetDatabase.SaveAssets();
         AssetDatabase.Refresh();

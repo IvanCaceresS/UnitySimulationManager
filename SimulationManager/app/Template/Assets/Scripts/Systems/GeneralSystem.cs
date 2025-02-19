@@ -46,7 +46,16 @@ public partial class GeneralSystem : SystemBase
             World.GetOrCreateSystemManaged<EndSimulationEntityCommandBufferSystem>();
         var ecb = ecbSystem.CreateCommandBuffer().AsParallelWriter();
         Dependency=Entities.WithReadOnly(parentMap).ForEach((Entity entity,int entityInQueryIndex,ref LocalTransform transform,ref GeneralComponent organism)=>
-        {
+        {   
+            // Inicializar TimeReference solo una vez.
+            if (!organism.TimeReferenceInitialized)
+            {
+                // Creamos un generador de números aleatorios usando el índice (puedes ajustar el seed según necesites)
+                Unity.Mathematics.Random rng = new Unity.Mathematics.Random((uint)(entityInQueryIndex + 1) * 99999);
+                float randomMultiplier = rng.NextFloat(0.9f, 1.1f);
+                organism.TimeReference *= randomMultiplier;
+                organism.TimeReferenceInitialized = true;
+            }
             float maxScale=organism.MaxScale;
             organism.GrowthDuration=organism.DivisionInterval=organism.TimeReference*organism.SeparationThreshold;
             if(transform.Scale<maxScale)

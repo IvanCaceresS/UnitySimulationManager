@@ -98,40 +98,49 @@ private void CrearEntidad(Vector3 p)
     }
     );
     string n=prefabs[currentPrefabIndex].name;
-    if(n=="SCerevisiae")
+    switch(n)
     {
-        entityManager.AddComponentData(e,new SCerevisiaeComponent
+        case"EColi":entityManager.AddComponentData(e,new EColiComponent
         {
-            TimeReference=3000f,SeparationThreshold=0.8f,MaxScale=5f,GrowthTime=0f,GrowthDuration=3000f*0.8f,TimeSinceLastDivision=0f,DivisionInterval=3000f*0.8f,HasGeneratedChild=false,Parent=Entity.Null,IsInitialCell=true,SeparationSign=0,GrowthDirection=new float3(0,0,0)
+            TimeReference=1200f,SeparationThreshold=0.7f,MaxScale=1f,GrowthTime=0f,GrowthDuration=1200f*0.7f,TimeSinceLastDivision=0f,DivisionInterval=1200f*0.7f,HasGeneratedChild=false,Parent=Entity.Null,IsInitialCell=true,SeparationSign=0
         }
         );
-    }
-    else
-    {
-        Debug.LogWarning($"No hay componente ECS para '{n}'");
+        break;
+        case"SCerevisiae":entityManager.AddComponentData(e,new SCerevisiaeComponent
+        {
+            TimeReference=5400f,SeparationThreshold=0.7f,MaxScale=5f,GrowthTime=0f,GrowthDuration=5400f*0.7f,TimeSinceLastDivision=0f,DivisionInterval=5400f*0.7f,HasGeneratedChild=false,Parent=Entity.Null,IsInitialCell=true,SeparationSign=0
+        }
+        );
+        break;
+        default:Debug.LogWarning($"No hay componente ECS para '{n}'");
+        break;
     }
     AddPhysicsComponents(e,n,os);
     Debug.Log($"Entidad '{n}' creada en {ap}");
 }
 private void AddPhysicsComponents(Entity e,string n,float s)
 {
-    BlobAssetReference<Unity.Physics.Collider> c=default;
+    BlobAssetReference<Unity.Physics.Collider>c=default;
     Material m=new Material
     {
         Friction=8f,Restitution=0f
     }
     ;
-    if(n=="SCerevisiae")
+    switch(n)
     {
-        c=Unity.Physics.SphereCollider.Create(new SphereGeometry
+        case"EColi":c=Unity.Physics.CapsuleCollider.Create(new CapsuleGeometry
+        {
+            Vertex0=new float3(0,-s,0),Vertex1=new float3(0,s,0),Radius=0.25f
+        }
+        ,CollisionFilter.Default,m);
+        break;
+        case"SCerevisiae":c=Unity.Physics.SphereCollider.Create(new SphereGeometry
         {
             Center=float3.zero,Radius=s*0.1f
         }
         ,CollisionFilter.Default,m);
-    }
-    else
-    {
-        Debug.LogWarning($"No collider para '{n}'");
+        break;
+        default:Debug.LogWarning($"No collider para '{n}'");
         return;
     }
     entityManager.AddComponentData(e,new PhysicsCollider

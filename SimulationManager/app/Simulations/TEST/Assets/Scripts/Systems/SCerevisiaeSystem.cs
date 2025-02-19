@@ -46,7 +46,16 @@ public partial class SCerevisiaeSystem : SystemBase
             World.GetOrCreateSystemManaged<EndSimulationEntityCommandBufferSystem>();
         var ecb = ecbSystem.CreateCommandBuffer().AsParallelWriter();
         Dependency=Entities.WithReadOnly(parentMap).ForEach((Entity entity,int entityInQueryIndex,ref LocalTransform transform,ref SCerevisiaeComponent organism)=>
-        {
+        {   
+            // Inicializar TimeReference solo una vez.
+            if (!organism.TimeReferenceInitialized)
+            {
+                // Creamos un generador de números aleatorios usando el índice (puedes ajustar el seed según necesites)
+                Unity.Mathematics.Random rng = new Unity.Mathematics.Random((uint)(entityInQueryIndex + 1) * 99999);
+                float randomMultiplier = rng.NextFloat(0.9f, 1.1f);
+                organism.TimeReference *= randomMultiplier;
+                organism.TimeReferenceInitialized = true;
+            }
             float maxScale=organism.MaxScale;
             organism.GrowthDuration=organism.DivisionInterval=organism.TimeReference*organism.SeparationThreshold;
             if(transform.Scale<maxScale)
@@ -67,6 +76,7 @@ if(transform.Scale>=maxScale)
         LocalTransform ct=transform;
         ct.Scale=0.01f;
         SCerevisiaeComponent cd=organism;
+        cd.TimeReferenceInitialized = false;
         cd.GrowthTime=0f;
         cd.TimeSinceLastDivision=0f;
         cd.IsInitialCell=false;
@@ -78,7 +88,7 @@ if(transform.Scale>=maxScale)
         organism.TimeSinceLastDivision=0f;
     }
 }
-if(!organism.IsInitialCell && organism.Parent!=Entity.Null && parentMap.TryGetValue(organism.Parent,out ParentData pd))
+if(!organism.IsInitialCell&&organism.Parent!=Entity.Null&&parentMap.TryGetValue(organism.Parent,out ParentData pd))
 {
     if(transform.Scale<organism.SeparationThreshold*maxScale)
     {

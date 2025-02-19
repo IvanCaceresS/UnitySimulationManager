@@ -2,102 +2,51 @@
 using UnityEngine;
 using UnityEditor;
 using System.IO;
-
 public static class PrefabMaterialCreator
 {
-    // Rutas donde se guardarán los prefabs y materiales
-    private const string prefabFolder = "Assets/Resources/Prefabs";
-    private const string materialFolder = "Assets/Resources/PrefabsMaterials";
-
-    [MenuItem("Tools/Crear Prefabs y Materiales")]
-    public static void CreatePrefabsAndMaterials()
+    const string pF="Assets/Resources/Prefabs",mF="Assets/Resources/PrefabsMaterials";
+    [MenuItem("Tools/Crear Prefabs y Materiales")]public static void CreatePrefabsAndMaterials()
     {
-        // Crear las carpetas si no existen
-        if (!AssetDatabase.IsValidFolder(prefabFolder))
+        if(!AssetDatabase.IsValidFolder(pF))
         {
-            AssetDatabase.CreateFolder("Assets/Resources", "Prefabs");
-            Debug.Log("Carpeta creada: " + prefabFolder);
+            AssetDatabase.CreateFolder("Assets/Resources","Prefabs");
+            Debug.Log("Carpeta creada: "+pF);
         }
-        if (!AssetDatabase.IsValidFolder(materialFolder))
+        if(!AssetDatabase.IsValidFolder(mF))
         {
-            AssetDatabase.CreateFolder("Assets/Resources", "PrefabsMaterials");
-            Debug.Log("Carpeta creada: " + materialFolder);
+            AssetDatabase.CreateFolder("Assets/Resources","PrefabsMaterials");
+            Debug.Log("Carpeta creada: "+mF);
         }
-
-        // Crear cada prefab y su material asociado
-        CreatePrefabAndMaterial("Cube", PrimitiveType.Cube, new Vector3(1f, 1f, 1f), new Vector3(90f, 0f, 0f), ColliderType.Box);
-        CreatePrefabAndMaterial("SCerevisiae", PrimitiveType.Sphere, new Vector3(5f, 5f, 5f), new Vector3(90f, 0f, 0f), ColliderType.Sphere);
-        CreatePrefabAndMaterial("EColi", PrimitiveType.Capsule, new Vector3(0.5f, 2f, 0.5f), new Vector3(90f, 0f, 0f), ColliderType.Capsule);
-
+        CPAM("SCerevisiae",PrimitiveType.Sphere,new Vector3(5,5,5),new Vector3(90,0,0),0);
+        CPAM("EColi",PrimitiveType.Capsule,new Vector3(.5f,2,0.5f),new Vector3(90,0,0),1);
         AssetDatabase.SaveAssets();
         AssetDatabase.Refresh();
-        Debug.Log("Prefabs y materiales creados exitosamente.");
+        Debug.Log("Prefabs y materiales creados.");
     }
-
-    // Enumeración para seleccionar el tipo de collider
-    private enum ColliderType { Box, Sphere, Capsule }
-
-    private static void CreatePrefabAndMaterial(string name, PrimitiveType primitiveType, Vector3 scale, Vector3 rotation, ColliderType colliderType)
+    static void CPAM(string n,PrimitiveType t,Vector3 s,Vector3 r,int c)
     {
-        // Crear el objeto primitivo
-        GameObject obj = GameObject.CreatePrimitive(primitiveType);
-        obj.name = name;
-        obj.transform.rotation = Quaternion.Euler(rotation);
-        obj.transform.localScale = scale;
-
-        // Eliminar el collider que crea CreatePrimitive (por seguridad) y agregar el deseado
-        Collider existingCollider = obj.GetComponent<Collider>();
-        if (existingCollider != null)
-            Object.DestroyImmediate(existingCollider);
-
-        switch (colliderType)
+        var o=GameObject.CreatePrimitive(t);
+        o.name=n;
+        o.transform.rotation=Quaternion.Euler(r);
+        o.transform.localScale=s;
+        var col=o.GetComponent<Collider>();
+        if(col!=null)Object.DestroyImmediate(col);
+        if(c==0)o.AddComponent<SphereCollider>();
+        else o.AddComponent<CapsuleCollider>();
+        var sh=Shader.Find("Universal Render Pipeline/Lit");
+        if(sh==null)
         {
-            case ColliderType.Box:
-                obj.AddComponent<BoxCollider>();
-                break;
-            case ColliderType.Sphere:
-                obj.AddComponent<SphereCollider>();
-                break;
-            case ColliderType.Capsule:
-                obj.AddComponent<CapsuleCollider>();
-                break;
-        }
-
-        // Crear el material usando el shader URP Lit
-        Shader shader = Shader.Find("Universal Render Pipeline/Lit");
-        if (shader == null)
-        {
-            Debug.LogError("Shader 'Universal Render Pipeline/Lit' no se encontró. Asegúrate de que URP esté instalado y configurado.");
+            Debug.LogError("Shader URP/Lit no encontrado.");
             return;
         }
-        Material mat = new Material(shader);
-        // Asignar color según el nombre
-        if (name == "Cube")
-            mat.color = Color.red;
-        else if (name == "SCerevisiae")
-            mat.color = Color.blue;
-        else if (name == "EColi")
-            mat.color = Color.green;
-        else
-            mat.color = Color.white;
-
-        // Guardar el material en Assets/Resources/PrefabsMaterials
-        string matPath = Path.Combine(materialFolder, name + ".mat");
-        AssetDatabase.CreateAsset(mat, matPath);
+        var m=new Material(sh);
+        m.color=n=="SCerevisiae"?new Color(0,0,1,1):n=="EColi"?new Color(0,1,0,1):Color.white;
+        AssetDatabase.CreateAsset(m,Path.Combine(mF,n+".mat"));
         AssetDatabase.SaveAssets();
         AssetDatabase.Refresh();
-
-        // Asignar el material al Renderer del objeto
-        Renderer renderer = obj.GetComponent<Renderer>();
-        if (renderer != null)
-            renderer.sharedMaterial = mat;
-
-        // Guardar el objeto como prefab en Assets/Resources/Prefabs
-        string prefabPath = Path.Combine(prefabFolder, name + ".prefab");
-        PrefabUtility.SaveAsPrefabAsset(obj, prefabPath);
-
-        // Destruir el objeto de la escena
-        Object.DestroyImmediate(obj);
+        o.GetComponent<Renderer>().sharedMaterial=m;
+        PrefabUtility.SaveAsPrefabAsset(o,Path.Combine(pF,n+".prefab"));
+        Object.DestroyImmediate(o);
     }
 }
 #endif
