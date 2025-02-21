@@ -74,9 +74,10 @@ def main():
       1. Recibe el nombre de la simulación y la descripción (pregunta) a enviar a la API.
       2. Verifica que la simulación no exista previamente.
       3. Si la pregunta ya fue consultada (cache), usa la respuesta cacheada y registra tokens 0.
-      4. De lo contrario, llama a la API real mediante api.call_api() y guarda los tokens reales.
-      5. Procesa la respuesta con formater.py para obtener los códigos.
-      6. Llama a importer.py para crear los archivos en la carpeta de la simulación.
+      4. De lo contrario, llama a la API real mediante api.call_api() hasta dos veces.
+      5. Si después de dos intentos no se obtiene respuesta, imprime un error y finaliza el proceso.
+      6. Procesa la respuesta con formater.py para obtener los códigos.
+      7. Llama a importer.py para crear los archivos en la carpeta de la simulación.
     """
     if len(sys.argv) < 3:
         print("Uso: api_manager.py <nombre-simulación> <pregunta>")
@@ -90,7 +91,6 @@ def main():
         print(f"La simulación '{simulation_name}' ya existe. Elija otro nombre.")
         sys.exit(1)
 
-    #print("ESTE ES EL ARCHIVO api_manager.py")
     print(f"Procesando simulación: {simulation_name}")
     print(f"Pregunta: {pregunta}")
 
@@ -100,10 +100,18 @@ def main():
         response = cached_response
         write_response_to_csv(pregunta, response, 0, 0)
     else:
-        # Llama a la API real definida en api.py
-        response, input_tokens, output_tokens = api.call_api(pregunta)
+        max_attempts = 2
+        response = ""
+        input_tokens = output_tokens = 0
+        for attempt in range(max_attempts):
+            response, input_tokens, output_tokens = api.call_api(pregunta)
+            if response:
+                break
+            else:
+                print(f"Intento {attempt + 1} fallido al llamar a la API.")
         if not response:
-            print("Error al obtener respuesta de la API.")
+            error_message = "No se pudo obtener respuesta de la API tras 2 intentos."
+            print(error_message)
             sys.exit(1)
         write_response_to_csv(pregunta, response, input_tokens, output_tokens)
 

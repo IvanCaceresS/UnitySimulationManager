@@ -10,6 +10,7 @@ from tkinter import ttk, messagebox, filedialog
 from tkinter.simpledialog import askstring
 from dotenv import load_dotenv
 from pathlib import Path
+import psutil  # Se usa para verificar procesos activos
 
 # ======================================================
 # Cargar configuración desde .env y verificar versión
@@ -54,6 +55,29 @@ SIMULATION_LOADED_FILE = os.path.join(STREAMING_ASSETS_FOLDER, "simulation_loade
 last_simulation_loaded = None
 
 # ======================================================
+# Función para cerrar Unity si está abierto
+# ======================================================
+def ensure_unity_closed():
+    # Se buscan procesos cuyo ejecutable coincida con UNITY_EXECUTABLE
+    unity_processes = []
+    for proc in psutil.process_iter(['name', 'exe']):
+        try:
+            exe = proc.info.get('exe', '')
+            if exe and os.path.normcase(exe) == os.path.normcase(UNITY_EXECUTABLE):
+                unity_processes.append(proc)
+        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+            continue
+    if unity_processes:
+        update_status("Unity se detectó abierto. Cerrándolo, por favor espere...")
+        for proc in unity_processes:
+            try:
+                proc.terminate()
+            except Exception as e:
+                print(f"Error al terminar el proceso: {e}")
+        psutil.wait_procs(unity_processes, timeout=5)
+        update_status("Unity ha sido cerrado.")
+
+# ======================================================
 # Función para abrir la carpeta de gráficos
 # ======================================================
 def open_graphs_folder(simulation_name):
@@ -96,6 +120,13 @@ def on_create_simulation():
     simulation_name = askstring("Crear Simulación", "Ingrese el nombre de la simulación:")
     if not simulation_name:
         update_status("Creación de simulación cancelada.")
+        return
+    simulation_name = simulation_name.strip()
+    # Verificar si ya existe una simulación con el mismo nombre
+    simulation_path = os.path.join(SIMULATIONS_DIR, simulation_name)
+    if os.path.exists(simulation_path):
+        messagebox.showerror("Error", f"Ya existe una simulación con el nombre '{simulation_name}'. Por favor, elija otro nombre.")
+        update_status("Simulación no creada. Nombre duplicado.")
         return
     # ... y la descripción de la simulación (la pregunta para la API)
     simulation_description = askstring("Descripción de la Simulación", "Describe la simulación:")
@@ -515,6 +546,9 @@ def on_load_simulation():
             update_status("La simulación seleccionada ya está cargada. Mostrando opciones disponibles...")
             main_window.after(500, show_options_window)
             return
+
+    # Antes de cargar una nueva simulación se asegura de que Unity esté cerrado.
+    ensure_unity_closed()
 
     update_status("Cargando la simulación, por favor espere...")
     if not os.path.exists(SIMULATION_PROJECT_PATH):

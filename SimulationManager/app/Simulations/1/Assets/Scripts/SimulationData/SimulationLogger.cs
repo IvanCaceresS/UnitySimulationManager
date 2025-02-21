@@ -1,9 +1,11 @@
 using UnityEngine;
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using System.Text;
 using System.Globalization;
+using System.Linq;
 
 public class SimulationLogger : MonoBehaviour
 {
@@ -53,6 +55,7 @@ public class SimulationLogger : MonoBehaviour
             Debug.LogWarning("SimulationLogger: No se encontró simulation_loaded.txt en StreamingAssets. Usando 'DefaultSimulation'.");
         }
 
+        // Buscar el Left_GUI en la escena
         leftGui = FindFirstObjectByType<Left_GUI>();
         if (leftGui == null)
         {
@@ -61,12 +64,9 @@ public class SimulationLogger : MonoBehaviour
             return;
         }
 
-        // Utilizar la carpeta "My Documents" para almacenar los resultados, según la consigna.
+        // Utilizar la carpeta "My Documents" para almacenar los resultados.
         string documentsPath = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
-        // Construir la ruta: Documents\SimulationLoggerData\<simulationName>
         string folderPath = Path.Combine(documentsPath, "SimulationLoggerData", simulationName);
-
-        // Crear la carpeta si no existe
         if (!Directory.Exists(folderPath))
         {
             try
@@ -81,29 +81,19 @@ public class SimulationLogger : MonoBehaviour
             }
         }
 
-        // Definir la ruta completa del archivo CSV
         logFilePath = Path.Combine(folderPath, CsvFileName);
         Debug.Log($"SimulationLogger: El CSV se almacenará en: {logFilePath}");
 
-        // En build (no en editor) arrancar automáticamente la captura
+        // En build, esperar a que Left_GUI tenga los nombres reales de los organismos antes de iniciar la captura.
         if (!Application.isEditor)
         {
-            StartLogging();
+            StartCoroutine(WaitForOrganismNamesAndStartLogging());
         }
     }
 
-    private void Update()
-    {
-        if (isLogging && Time.time - lastLogTime >= LogInterval)
-        {
-            lastLogTime = Time.time;
-            LogAllData();
-        }
-    }
-
+    // En editor se permite iniciar/detener mediante botón
     private void OnGUI()
     {
-        // En editor se muestra el botón para iniciar/detener
         if (Application.isEditor)
         {
             string buttonText = isLogging ? "Finalizar captación de estadísticas" : "Iniciar captación de estadísticas";
@@ -117,12 +107,35 @@ public class SimulationLogger : MonoBehaviour
         }
     }
 
+    private void Update()
+    {
+        if (isLogging && Time.time - lastLogTime >= LogInterval)
+        {
+            lastLogTime = Time.time;
+            LogAllData();
+        }
+    }
+
+    /// <summary>
+    /// Espera hasta que leftGui.OrganismNames contenga al menos un nombre real
+    /// (es decir, un nombre distinto a un valor marcador como "Cantidad de organismos").
+    /// </summary>
+    private IEnumerator WaitForOrganismNamesAndStartLogging()
+    {
+        // Espera indefinidamente hasta que la lista no sea nula y contenga al menos un elemento
+        // distinto a "Cantidad de organismos".
+        while (leftGui.OrganismNames == null || !leftGui.OrganismNames.Any(name => !string.IsNullOrEmpty(name) && name != "Cantidad de organismos"))
+        {
+            yield return null;
+        }
+        StartLogging();
+    }
+
     /// <summary>
     /// Inicia la captura de datos: elimina el archivo CSV anterior (si existe) y escribe el encabezado.
     /// </summary>
     private void StartLogging()
     {
-        // Eliminar el archivo anterior para comenzar de cero
         if (File.Exists(logFilePath))
         {
             try
@@ -134,7 +147,6 @@ public class SimulationLogger : MonoBehaviour
                 Debug.LogError($"SimulationLogger: Error al eliminar el archivo anterior: {ex.Message}");
             }
         }
-
         isLogging = true;
         lastLogTime = Time.time;
         WriteCSVHeader();
@@ -159,12 +171,8 @@ public class SimulationLogger : MonoBehaviour
             return;
 
         StringBuilder csvLine = new StringBuilder();
-
-        // 1. Timestamp (formateado)
         csvLine.Append(DateTime.Now.ToString("dd-MM-yyyy HH:mm:ss", CultureInfo.InvariantCulture));
         csvLine.Append(CsvSeparator);
-
-        // 2. Datos de la simulación (obtenidos desde Left_GUI y GameStateManager)
         csvLine.Append(leftGui.cachedFPS.ToString("F2", CultureInfo.InvariantCulture)).Append(CsvSeparator);
         csvLine.Append(leftGui.cachedRealTime.ToString("F2", CultureInfo.InvariantCulture)).Append(CsvSeparator);
         csvLine.Append(leftGui.cachedSimulatedTime.ToString("F2", CultureInfo.InvariantCulture)).Append(CsvSeparator);
@@ -172,17 +180,18 @@ public class SimulationLogger : MonoBehaviour
         csvLine.Append(leftGui.cachedFrameCount.ToString(CultureInfo.InvariantCulture)).Append(CsvSeparator);
         csvLine.Append(GameStateManager.IsPaused ? "Sí" : "No");
 
-        // 3. Conteo de organismos
-        foreach (var orgName in leftGui.OrganismNames)
+        if (leftGui.OrganismNames != null)
         {
-            int count = 0;
-            if (leftGui.entityCounts != null && leftGui.entityCounts.TryGetValue(orgName, out count))
+            foreach (var orgName in leftGui.OrganismNames)
             {
-                // valor obtenido
+                int count = 0;
+                if (leftGui.entityCounts != null && leftGui.entityCounts.TryGetValue(orgName, out count))
+                {
+                    // Se obtiene el conteo correcto.
+                }
+                csvLine.Append(CsvSeparator).Append(count.ToString(CultureInfo.InvariantCulture));
             }
-            csvLine.Append(CsvSeparator).Append(count.ToString(CultureInfo.InvariantCulture));
         }
-
         csvLine.AppendLine();
 
         try
@@ -211,7 +220,7 @@ public class SimulationLogger : MonoBehaviour
             "Pausado"
         };
 
-        if (leftGui != null && leftGui.OrganismNames != null)
+        if (leftGui != null && leftGui.OrganismNames != null && leftGui.OrganismNames.Any())
             headers.AddRange(leftGui.OrganismNames);
 
         string headerLine = string.Join(CsvSeparator, headers) + Environment.NewLine;

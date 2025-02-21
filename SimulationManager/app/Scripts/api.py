@@ -3,6 +3,7 @@ import os
 import csv
 from dotenv import load_dotenv
 import tiktoken
+import sys
 
 # Cargar las variables de entorno desde el archivo .env ubicado en la carpeta superior
 load_dotenv(dotenv_path="../.env")
@@ -16,7 +17,6 @@ SYSTEM_MESSAGE = (
     "Eres un modelo especializado en generar código C# para simulaciones de Unity. Considera que los tiempos son en segundos; además, los colores en Unity se expresan en valores RGB divididos en 255. Debes contestar tal cual como se te fue entrenado, sin agregar nada más de lo que se espera en C#. No puedes responder en ningún otro lenguaje de programación ni añadir comentarios o palabras innecesarias. Solo puedes responder a consultas relacionadas con simulaciones en Unity sobre EColi, SCerevisiae o ambas, donde se indiquen: - El color de la(s) célula(s). - El tiempo de duplicación en minutos. - El porcentaje de crecimiento para separarse del padre. Tu respuesta debe incluir estrictamente estos scripts en el orden especificado: - Si se piden ambas (EColi y SCerevisiae): 1.PrefabMaterialCreator.cs, 2.CreatePrefabsOnClick.cs, 3.EColiComponent.cs, 4.SCerevisiaeComponent.cs, 5.EColiSystem.cs, 6.SCerevisiaeSystem.cs. - Si se pide solo EColi: 1.PrefabMaterialCreator.cs, 2.CreatePrefabsOnClick.cs, 3.EColiComponent.cs, 4.EColiSystem.cs. - Si se pide solo SCerevisiae: 1.PrefabMaterialCreator.cs, 2.CreatePrefabsOnClick.cs, 3.SCerevisiaeComponent.cs, 4.SCerevisiaeSystem.cs - Si se pide 2 EColi: 1.PrefabMaterialCreator.cs, 2.CreatePrefabsOnClick.cs, 3.EColi_1Component.cs, 4.EColi_2Component.cs, 5.EColi_1System.cs, 6.EColi_2System.cs. - Si se pide 2 SCerevisiae: 1.PrefabMaterialCreator.cs, 2.CreatePrefabsOnClick.cs, 3.SCerevisiae_1Component.cs, 4.SCerevisiae_2Component.cs, 5.SCerevisiae_1System.cs, 6.SCerevisiae_2System.cs. El formato de cada script debe ser \"1.PrefabMaterialCreator.cs{...}2.CreatePrefabsOnClick.cs{...}\" etc. Cualquier pregunta que no cumpla con las características anteriores será respondida con: \"ERROR FORMATO DE PREGUNTA.\"."
 )
 
-
 def count_tokens(text: str) -> int:
     """
     Cuenta la cantidad de tokens del texto usando la codificación adecuada para el modelo.
@@ -27,14 +27,27 @@ def count_tokens(text: str) -> int:
         encoding = tiktoken.get_encoding("cl100k_base")
     return len(encoding.encode(text))
 
+def check_api_connection() -> bool:
+    """
+    Verifica la conexión a la API intentando listar los modelos disponibles.
+    """
+    try:
+        openai.Model.list()
+        return True
+    except Exception as e:
+        print("Error al conectar con la API:", e)
+        return False
+
 def call_api(pregunta: str) -> tuple:
     """
     Llama a la API de OpenAI usando el modelo fine-tuned y devuelve la respuesta generada,
-    junto con la cantidad de tokens de entrada y salida.
-
-    :param pregunta: El prompt o pregunta a enviar.
-    :return: Tuple (respuesta, input_tokens, output_tokens)
+    junto con la cantidad de tokens de entrada y salida. Antes de llamar a la API,
+    verifica la conexión utilizando check_api_connection().
     """
+    if not check_api_connection():
+        print("No se pudo conectar a la API. Verifique su conexión o la API Key.")
+        return "", 0, 0
+
     try:
         # Construir el listado de mensajes con el system prompt y el mensaje del usuario.
         messages = [
@@ -48,6 +61,7 @@ def call_api(pregunta: str) -> tuple:
             model=FINE_TUNED_MODEL_NAME,
             messages=messages,
             temperature=0,  # Temperatura 0 para salida determinista
+            timeout=30      # Tiempo máximo de espera en segundos para la respuesta
         )
         
         reply = response.choices[0].message["content"].strip()
