@@ -82,18 +82,22 @@ def ensure_unity_closed():
 # ======================================================
 def open_graphs_folder(simulation_name):
     folder_path = Path.home() / "Documents" / "SimulationLoggerData" / simulation_name / "Graficos"
-    if folder_path.exists():
+    # Si la carpeta no existe, intentar crearla
+    if not folder_path.exists():
         try:
-            if platform.system() == "Windows":
-                subprocess.Popen(["explorer", str(folder_path)])
-            elif platform.system() == "Darwin":
-                subprocess.Popen(["open", str(folder_path)])
-            else:
-                subprocess.Popen(["xdg-open", str(folder_path)])
+            folder_path.mkdir(parents=True, exist_ok=True)
         except Exception as e:
-            messagebox.showerror("Error", f"No se pudo abrir la carpeta de gráficos:\n{e}")
-    else:
-        messagebox.showerror("Error", f"La carpeta de gráficos no existe: {folder_path}")
+            messagebox.showerror("Error", f"No se pudo crear la carpeta de gráficos:\n{e}")
+            return
+    try:
+        if platform.system() == "Windows":
+            subprocess.Popen(["explorer", str(folder_path)])
+        elif platform.system() == "Darwin":
+            subprocess.Popen(["open", str(folder_path)])
+        else:
+            subprocess.Popen(["xdg-open", str(folder_path)])
+    except Exception as e:
+        messagebox.showerror("Error", f"No se pudo abrir la carpeta de gráficos:\n{e}")
 
 # ======================================================
 # Funciones para deshabilitar y habilitar botones
