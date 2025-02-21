@@ -7,10 +7,65 @@ import threading
 import time
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
-from tkinter.simpledialog import askstring
 from dotenv import load_dotenv
 from pathlib import Path
 import psutil  # Se usa para verificar procesos activos
+
+# ======================================================
+# Función para centrar una ventana en la pantalla
+# ======================================================
+def center_window(window, width, height):
+    window.update_idletasks()
+    screen_width = window.winfo_screenwidth()
+    screen_height = window.winfo_screenheight()
+    x = (screen_width - width) // 2
+    y = (screen_height - height) // 2
+    window.geometry(f"{width}x{height}+{x}+{y}")
+
+# ======================================================
+# Cuadro de diálogo de entrada personalizado
+# ======================================================
+class CustomInputDialog(tk.Toplevel):
+    def __init__(self, parent, title, prompt, width=400, height=150, font=("Segoe UI", 12)):
+        super().__init__(parent)
+        self.title(title)
+        # Centrar la ventana en la pantalla
+        center_window(self, width, height)
+        self.resizable(False, False)
+        self.transient(parent)
+        self.grab_set()
+        self.result = None
+
+        # Estilo y layout
+        self.configure(bg="white")
+        prompt_label = ttk.Label(self, text=prompt, font=font)
+        prompt_label.pack(pady=(20, 10), padx=20)
+
+        self.entry = ttk.Entry(self, font=font)
+        self.entry.pack(pady=5, padx=20, fill="x")
+        
+        button_frame = ttk.Frame(self)
+        button_frame.pack(pady=10)
+        ok_button = ttk.Button(button_frame, text="Aceptar", command=self.ok)
+        ok_button.pack(side="left", padx=5)
+        cancel_button = ttk.Button(button_frame, text="Cancelar", command=self.cancel)
+        cancel_button.pack(side="left", padx=5)
+
+        self.bind("<Return>", lambda event: self.ok())
+        self.bind("<Escape>", lambda event: self.cancel())
+        self.entry.focus()
+        self.wait_window(self)
+
+    def ok(self):
+        self.result = self.entry.get()
+        self.destroy()
+
+    def cancel(self):
+        self.destroy()
+
+def custom_askstring(title, prompt):
+    dialog = CustomInputDialog(main_window, title, prompt)
+    return dialog.result
 
 # ======================================================
 # Cargar configuración desde .env y verificar versión
@@ -58,7 +113,6 @@ last_simulation_loaded = None
 # Función para cerrar Unity si está abierto
 # ======================================================
 def ensure_unity_closed():
-    # Se buscan procesos cuyo ejecutable coincida con UNITY_EXECUTABLE
     unity_processes = []
     for proc in psutil.process_iter(['name', 'exe']):
         try:
@@ -82,7 +136,6 @@ def ensure_unity_closed():
 # ======================================================
 def open_graphs_folder(simulation_name):
     folder_path = Path.home() / "Documents" / "SimulationLoggerData" / simulation_name / "Graficos"
-    # Si la carpeta no existe, intentar crearla
     if not folder_path.exists():
         try:
             folder_path.mkdir(parents=True, exist_ok=True)
@@ -120,35 +173,30 @@ def enable_all_buttons():
 # Función para crear simulación (llama a api_manager.py)
 # ======================================================
 def on_create_simulation():
-    # Pedir en el hilo principal el nombre de la simulación...
-    simulation_name = askstring("Crear Simulación", "Ingrese el nombre de la simulación:")
+    simulation_name = custom_askstring("Crear Simulación", "Ingrese el nombre de la simulación:")
     if not simulation_name:
         update_status("Creación de simulación cancelada.")
         return
     simulation_name = simulation_name.strip()
-    # Verificar si ya existe una simulación con el mismo nombre
     simulation_path = os.path.join(SIMULATIONS_DIR, simulation_name)
     if os.path.exists(simulation_path):
         messagebox.showerror("Error", f"Ya existe una simulación con el nombre '{simulation_name}'. Por favor, elija otro nombre.")
         update_status("Simulación no creada. Nombre duplicado.")
         return
-    # ... y la descripción de la simulación (la pregunta para la API)
-    simulation_description = askstring("Descripción de la Simulación", "Describe la simulación:")
+    simulation_description = custom_askstring("Descripción de la Simulación", "Describe la simulación:")
     if not simulation_description:
         update_status("Creación de simulación cancelada. Se requiere una descripción.")
         return
-    # Lanza la tarea en un hilo separado
     threading.Thread(target=create_simulation, args=(simulation_name, simulation_description), daemon=True).start()
 
 def create_simulation(simulation_name, simulation_description):
     update_status("Creando simulación, por favor espere...")
     disable_all_buttons()
     try:
-        # Se pasa el nombre y la descripción a api_manager.py
         subprocess.run([sys.executable, "./Scripts/api_manager.py", simulation_name, simulation_description], check=True)
         update_status("Simulación creada exitosamente.")
         messagebox.showinfo("Éxito", "Simulación creada exitosamente.")
-        populate_simulations()  # Refrescar la lista de simulaciones
+        populate_simulations()
     except subprocess.CalledProcessError as e:
         messagebox.showerror("Error", f"Error al crear simulación:\n{e}")
         update_status("Error al crear simulación.")
@@ -419,8 +467,9 @@ def delete_simulation(simulation_name):
 # INTERFAZ GRÁFICA (GUI)
 # ======================================================
 main_window = tk.Tk()
+main_window.iconbitmap("icono.ico")
 main_window.title("Gestor de Simulaciones de Unity")
-main_window.geometry("700x500")
+center_window(main_window, 700, 500)
 main_window.resizable(False, False)
 
 style = ttk.Style(main_window)
@@ -449,7 +498,7 @@ main_window.config(menu=menubar)
 header_frame = ttk.Frame(main_window, padding=(10, 10))
 header_frame.pack(fill="x")
 header_label = ttk.Label(header_frame, text="Gestor de Simulaciones de Unity", font=("Segoe UI", 20, "bold"), foreground="#2C3E50")
-header_label.pack(side="left")
+header_label.pack(side="top")
 
 main_frame = ttk.Frame(main_window, padding=10)
 main_frame.pack(expand=True, fill="both")
@@ -551,7 +600,6 @@ def on_load_simulation():
             main_window.after(500, show_options_window)
             return
 
-    # Antes de cargar una nueva simulación se asegura de que Unity esté cerrado.
     ensure_unity_closed()
 
     update_status("Cargando la simulación, por favor espere...")
@@ -619,7 +667,7 @@ def on_delete_simulation():
 def show_options_window():
     options_win = tk.Toplevel(main_window)
     options_win.title("Opciones Post-Build")
-    options_win.geometry("400x300")
+    center_window(options_win, 400, 300)
     options_win.resizable(False, False)
     
     options_frame = ttk.Frame(options_win, padding=20)
@@ -641,11 +689,7 @@ def show_options_window():
     btn_salir = ttk.Button(options_frame, text="Salir", command=main_window.destroy)
     btn_salir.pack(pady=5, fill="x")
     
-    main_x = main_window.winfo_x()
-    main_y = main_window.winfo_y()
-    options_win.geometry(f"+{main_x + 150}+{main_y + 150}")
     update_status("Opciones disponibles.")
 
 populate_simulations()
-
 main_window.mainloop()
