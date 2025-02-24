@@ -1,5 +1,6 @@
 using UnityEngine;
 using UnityEngine.SceneManagement;
+using System.Collections; // Necesario para las corrutinas
 
 public class Right_GUI : MonoBehaviour
 {
@@ -19,6 +20,9 @@ public class Right_GUI : MonoBehaviour
     private GUIStyle labelStyle;
     private GUIStyle windowStyle;
 
+    // Bandera para controlar el avance de frame
+    private bool isAdvancingFrame = false;
+
     void Start()
     {   
         GameStateManager.OnSetupComplete += EnableGUI;
@@ -26,8 +30,6 @@ public class Right_GUI : MonoBehaviour
         QualitySettings.vSyncCount = 0;
         Application.targetFrameRate = fpsLevels[currentFPSIndex];
         deltaTimeInput = GameStateManager.DeltaTime.ToString("F2");
-
-        // No se pueden usar GUI.skin aquí, así que se inicializarán en OnGUI.
     }
 
     void OnDestroy()
@@ -43,7 +45,9 @@ public class Right_GUI : MonoBehaviour
 
     void OnGUI()
     {
-        // Inicializa estilos de forma lazy en OnGUI (se pueden usar GUI.skin aquí).
+        if (!GameStateManager.IsSetupComplete) return;
+
+        // Inicializa estilos de forma lazy en OnGUI
         if (buttonStyle == null)
         {
             buttonStyle = new GUIStyle(GUI.skin.button)
@@ -69,129 +73,153 @@ public class Right_GUI : MonoBehaviour
             };
         }
 
-        if (!GameStateManager.IsSetupComplete) return;
-
         if (showDeltaTimeWindow)
         {
             ShowDeltaTimeWindow();
         }
         else
         {
-            // Botones en la esquina superior derecha
             int buttonWidth = 80;
             int buttonHeight = 30;
             int margin = 10;
             int startX = Screen.width - buttonWidth - margin;
             int startY = margin;
- 
-            if (GUI.Button(new Rect(startX, startY, buttonWidth, buttonHeight), $"FPS: {fpsLevels[currentFPSIndex]}", buttonStyle))
+            
+            // Usamos buttonIndex para ir apilando los botones verticalmente
+            int buttonIndex = 0;
+
+            // 1) Botón de FPS
+            if (GUI.Button(new Rect(startX, startY + buttonIndex * (buttonHeight + margin),
+                                    buttonWidth, buttonHeight), 
+                        $"FPS: {fpsLevels[currentFPSIndex]}", buttonStyle))
             {
                 ToggleFPSLimit();
             }
- 
-            if (GUI.Button(new Rect(startX, startY + buttonHeight + margin, buttonWidth, buttonHeight), isPaused ? "Reanudar" : "Pausar", buttonStyle))
+            buttonIndex++;
+
+            // 2) Botón Reanudar / Pausar
+            if (GUI.Button(new Rect(startX, startY + buttonIndex * (buttonHeight + margin),
+                                    buttonWidth, buttonHeight), 
+                        isPaused ? "Reanudar" : "Pausar", buttonStyle))
             {
                 TogglePause();
             }
- 
-            if (GUI.Button(new Rect(startX, startY + 2*(buttonHeight + margin), buttonWidth, buttonHeight), "Reiniciar", buttonStyle))
+            buttonIndex++;
+
+            // 3) Botón Reiniciar
+            if (GUI.Button(new Rect(startX, startY + buttonIndex * (buttonHeight + margin),
+                                    buttonWidth, buttonHeight), 
+                        "Reiniciar", buttonStyle))
             {
                 RestartSimulation();
             }
- 
-            if (GUI.Button(new Rect(startX, startY + 3*(buttonHeight + margin), buttonWidth, buttonHeight), "Salir", buttonStyle))
+            buttonIndex++;
+
+            // 4) Botón Salir
+            if (GUI.Button(new Rect(startX, startY + buttonIndex * (buttonHeight + margin),
+                                    buttonWidth, buttonHeight), 
+                        "Salir", buttonStyle))
             {
                 ExitSimulation();
             }
+            buttonIndex++;
+
+            // 5) Botón “+1 Frame” (solo si está en pausa)
+            if (isPaused)
+            {
+                if (GUI.Button(new Rect(startX, startY + buttonIndex * (buttonHeight + margin),
+                                        buttonWidth, buttonHeight),
+                            "+1 Frame", buttonStyle))
+                {
+                    AdvanceOneFrame();
+                }
+                buttonIndex++;
+            }
         }
- 
+
         // Botón para mostrar/ocultar controles de cámara en la esquina inferior derecha
         if (GUI.Button(new Rect(Screen.width - 120, Screen.height - 40, 100, 30), "Controles", buttonStyle))
         {
             showControls = !showControls;
         }
- 
+
         if (showControls)
         {
             DisplayControlsGUI();
         }
     }
 
+
     private void ShowDeltaTimeWindow()
     {
         int windowWidth = 300;
         int windowHeight = 120;
         Rect windowRect = new Rect((Screen.width - windowWidth) / 2, (Screen.height - windowHeight) / 2, windowWidth, windowHeight);
- 
+
         GUI.Window(0, windowRect, DeltaTimeWindow, "Configuración de Simulación", windowStyle);
     }
 
     private void DeltaTimeWindow(int windowID)
-{
-    // Crear un estilo centrado para las etiquetas
-    GUIStyle centeredLabelStyle = new GUIStyle(labelStyle)
     {
-        alignment = TextAnchor.MiddleCenter
-    };
-
-    GUILayout.BeginVertical();
-    GUILayout.FlexibleSpace(); // Espacio flexible arriba para centrado vertical
-    
-    // Label centrado
-    GUILayout.BeginHorizontal();
-    GUILayout.FlexibleSpace();
-    GUILayout.Label($"Ingrese deltaTime ({LowDeltaTimeLimit} - {HighDeltaTimeLimit}):", centeredLabelStyle, GUILayout.Width(280));
-    GUILayout.FlexibleSpace();
-    GUILayout.EndHorizontal();
-
-    // Campo de texto centrado
-    GUILayout.BeginHorizontal();
-    GUILayout.FlexibleSpace();
-    deltaTimeInput = GUILayout.TextField(deltaTimeInput, GUILayout.Width(50));
-    GUILayout.FlexibleSpace();
-    GUILayout.EndHorizontal();
-
-    // Slider centrado
-    GUILayout.BeginHorizontal();
-    GUILayout.FlexibleSpace();
-    float parsedDeltaTime;
-    if (!float.TryParse(deltaTimeInput, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out parsedDeltaTime))
-        parsedDeltaTime = 1.00f;
-    parsedDeltaTime = Mathf.Clamp(parsedDeltaTime, LowDeltaTimeLimit, HighDeltaTimeLimit);
-    parsedDeltaTime = GUILayout.HorizontalSlider(parsedDeltaTime, LowDeltaTimeLimit, HighDeltaTimeLimit, GUILayout.Width(280));
-    deltaTimeInput = parsedDeltaTime.ToString("F2", System.Globalization.CultureInfo.InvariantCulture);
-    GUILayout.FlexibleSpace();
-    GUILayout.EndHorizontal();
-
-    // Botón centrado
-    GUILayout.BeginHorizontal();
-    GUILayout.FlexibleSpace();
-    if (GUILayout.Button("Start Simulation", GUILayout.Width(280)))
-    {
-        GameStateManager.SetDeltaTime(parsedDeltaTime);
-        showDeltaTimeWindow = false;
-        isPaused = false;
-        Time.timeScale = 1;
-        GameStateManager.SetPauseState(isPaused);
-
-        Left_GUI leftGUI = FindFirstObjectByType<Left_GUI>();
-        if (leftGUI != null)
+        GUIStyle centeredLabelStyle = new GUIStyle(labelStyle)
         {
-            leftGUI.StartSimulation();
-        }
-    }
-    GUILayout.FlexibleSpace();
-    GUILayout.EndHorizontal();
+            alignment = TextAnchor.MiddleCenter
+        };
 
-    GUILayout.FlexibleSpace(); // Espacio flexible abajo para centrado vertical
-    GUILayout.EndVertical();
-}
+        GUILayout.BeginVertical();
+        GUILayout.FlexibleSpace();
+        
+        GUILayout.BeginHorizontal();
+        GUILayout.FlexibleSpace();
+        GUILayout.Label($"Ingrese deltaTime ({LowDeltaTimeLimit} - {HighDeltaTimeLimit}):", centeredLabelStyle, GUILayout.Width(280));
+        GUILayout.FlexibleSpace();
+        GUILayout.EndHorizontal();
+
+        GUILayout.BeginHorizontal();
+        GUILayout.FlexibleSpace();
+        deltaTimeInput = GUILayout.TextField(deltaTimeInput, GUILayout.Width(50));
+        GUILayout.FlexibleSpace();
+        GUILayout.EndHorizontal();
+
+        GUILayout.BeginHorizontal();
+        GUILayout.FlexibleSpace();
+        float parsedDeltaTime;
+        if (!float.TryParse(deltaTimeInput, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out parsedDeltaTime))
+            parsedDeltaTime = 1.00f;
+        parsedDeltaTime = Mathf.Clamp(parsedDeltaTime, LowDeltaTimeLimit, HighDeltaTimeLimit);
+        parsedDeltaTime = GUILayout.HorizontalSlider(parsedDeltaTime, LowDeltaTimeLimit, HighDeltaTimeLimit, GUILayout.Width(280));
+        deltaTimeInput = parsedDeltaTime.ToString("F2", System.Globalization.CultureInfo.InvariantCulture);
+        GUILayout.FlexibleSpace();
+        GUILayout.EndHorizontal();
+
+        GUILayout.BeginHorizontal();
+        GUILayout.FlexibleSpace();
+        if (GUILayout.Button("Start Simulation", GUILayout.Width(280)))
+        {
+            GameStateManager.SetDeltaTime(parsedDeltaTime);
+            showDeltaTimeWindow = false;
+            isPaused = false;
+            Time.timeScale = 1;
+            GameStateManager.SetPauseState(isPaused);
+
+            Left_GUI leftGUI = FindFirstObjectByType<Left_GUI>();
+            if (leftGUI != null)
+            {
+                leftGUI.StartSimulation();
+            }
+        }
+        GUILayout.FlexibleSpace();
+        GUILayout.EndHorizontal();
+
+        GUILayout.FlexibleSpace();
+        GUILayout.EndVertical();
+    }
 
     private void DisplayControlsGUI()
     {
         Rect rect = new Rect(Screen.width - 200, Screen.height - 240, 180, 190);
         GUI.Box(rect, "Controles de Cámara", windowStyle);
- 
+
         GUILayout.BeginArea(new Rect(Screen.width - 180, Screen.height - 220, 170, 180));
         GUILayout.Label("WASD: Moverse", labelStyle);
         GUILayout.Label("Espacio: Elevarse", labelStyle);
@@ -202,41 +230,41 @@ public class Right_GUI : MonoBehaviour
         GUILayout.Label("Botón FPS: Alternar Límite", labelStyle);
         GUILayout.EndArea();
     }
- 
+
     private void TogglePause()
     {
         isPaused = !isPaused;
         Time.timeScale = isPaused ? 0 : 1;
         GameStateManager.SetPauseState(isPaused);
     }
- 
+
     private void ToggleFPSLimit()
     {
         currentFPSIndex = (currentFPSIndex + 1) % fpsLevels.Length;
         QualitySettings.vSyncCount = 0;
         Application.targetFrameRate = fpsLevels[currentFPSIndex];
     }
- 
+
     private void RestartSimulation()
     {
         isPaused = false;
         Time.timeScale = 1;
         GameStateManager.SetPauseState(isPaused);
         GameStateManager.ResetGameState();
- 
+
         CreatePrefabsOnClick spawner = FindFirstObjectByType<CreatePrefabsOnClick>();
         if (spawner != null)
             spawner.ResetSimulation();
         else
             Debug.LogWarning("Right_GUI: No se encontró CreatePrefabsOnClick en la escena.");
- 
+
         Left_GUI leftGUI = FindFirstObjectByType<Left_GUI>();
         if (leftGUI != null)
             leftGUI.ResetSimulation();
- 
+
         showDeltaTimeWindow = true;
     }
- 
+
     private void ExitSimulation()
     {
 #if UNITY_EDITOR
@@ -245,4 +273,41 @@ public class Right_GUI : MonoBehaviour
         Application.Quit();
 #endif
     }
+
+    // Función para avanzar un frame cuando la simulación está pausada
+    private void AdvanceOneFrame()
+    {
+        if (!isAdvancingFrame)
+        {
+            StartCoroutine(AdvanceOneFrameCoroutine());
+        }
+    }
+
+    private IEnumerator AdvanceOneFrameCoroutine()
+    {
+        isAdvancingFrame = true;
+
+        // Guardar el estado anterior de pausa
+        bool prevIsPaused = isPaused;
+
+        // Quitar la pausa lógicamente para que la simulación no se salte el frame
+        isPaused = false;
+        GameStateManager.SetPauseState(false);
+
+        // Quitar la pausa real (timeScale)
+        Time.timeScale = 1;
+
+        // Esperar un frame de física si tu lógica está en FixedUpdate,
+        // o bien un frame normal con "yield return null" si está en Update.
+        yield return new WaitForFixedUpdate();
+        // yield return null;  // <- usar si tu Update es donde corre la lógica
+
+        // Volver a pausar todo
+        Time.timeScale = 0;
+        isPaused = prevIsPaused;
+        GameStateManager.SetPauseState(true);
+
+        isAdvancingFrame = false;
+    }
+
 }
