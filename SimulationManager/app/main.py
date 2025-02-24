@@ -574,7 +574,6 @@ def populate_simulations():
     simulations = get_simulations()
     if not simulations:
         messagebox.showerror("Error", "No se encontraron simulaciones en la carpeta './Simulations'.")
-        main_window.destroy()
     else:
         for sim in simulations:
             sim_tree.insert("", "end", values=(sim["name"], sim["creation"], sim["last_opened"]))
