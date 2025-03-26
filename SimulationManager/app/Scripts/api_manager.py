@@ -2,9 +2,8 @@ import os
 import sys
 import formater
 import importer
-import api  # Importa el módulo que llama a la API de OpenAI
+import api
 
-# Usamos el separador especial
 DELIMITER = "%|%"
 RESPONSES_CSV = os.path.join(".", "Responses", "Responses.csv")
 
@@ -62,68 +61,79 @@ def get_cached_response(pregunta: str) -> str:
             continue
         cached_pregunta = parts[1]
         cached_respuesta = parts[2]
-        cached_input_tokens = parts[3]
-        cached_output_tokens = parts[4]
-        if cached_pregunta == pregunta and cached_input_tokens != "0" and cached_output_tokens != "0":
+        if cached_pregunta == pregunta:
             return cached_respuesta
     return None
 
 def main():
-    """
-    Flujo:
-      1. Recibe el nombre de la simulación y la descripción (pregunta) a enviar a la API.
-      2. Verifica que la simulación no exista previamente.
-      3. Si la pregunta ya fue consultada (cache), usa la respuesta cacheada y registra tokens 0.
-      4. De lo contrario, llama a la API real mediante api.call_api() hasta dos veces.
-      5. Si después de dos intentos no se obtiene respuesta, imprime un error y finaliza el proceso.
-      6. Procesa la respuesta con formater.py para obtener los códigos.
-      7. Llama a importer.py para crear los archivos en la carpeta de la simulación.
-    """
     if len(sys.argv) < 3:
         print("Uso: api_manager.py <nombre-simulación> <pregunta>")
         sys.exit(1)
 
     simulation_name = sys.argv[1]
-    pregunta = sys.argv[2]
+    original_pregunta = sys.argv[2]
     
-    simulation_folder = os.path.join("..", "Simulations", simulation_name)
-    if os.path.exists(simulation_folder):
-        print(f"La simulación '{simulation_name}' ya existe. Elija otro nombre.")
+    if os.path.exists(os.path.join("..", "Simulations", simulation_name)):
+        print(f"Simulación '{simulation_name}' ya existe")
         sys.exit(1)
 
-    print(f"Procesando simulación: {simulation_name}")
-    print(f"Pregunta: {pregunta}")
+    print(f"\nIniciando procesamiento para: {simulation_name}")
+    print(f"Consulta original: {original_pregunta}")
 
-    cached_response = get_cached_response(pregunta)
-    if cached_response is not None:
-        print("Usando respuesta cacheada para la pregunta.")
-        response = cached_response
-        write_response_to_csv(pregunta, response, 0, 0)
+    # Paso 1: Validación y formateo con modelo secundario
+    formatted_pregunta, second_input_tk, second_output_tk = api.call_secondary_model(original_pregunta)
+    
+    if not formatted_pregunta:
+        print("Error crítico: Fallo al contactar modelo secundario")
+        sys.exit(1)
+        
+    if formatted_pregunta.strip() == "ERROR DE CONTENIDO":
+        print("❌ Pregunta rechazada por contenido inválido")
+        write_response_to_csv(formatted_pregunta, "", second_input_tk, second_output_tk)
+        sys.exit(7)
+
+    print(f"\nPregunta validada y formateada: {formatted_pregunta}")
+
+    # Paso 2: Verificar cache
+    cached_response = get_cached_response(formatted_pregunta)
+    if cached_response:
+        print("✅ Usando respuesta en caché")
+        write_response_to_csv(formatted_pregunta, cached_response, second_input_tk, second_output_tk)
+        final_response = cached_response
     else:
-        max_attempts = 2
-        response = ""
-        input_tokens = output_tokens = 0
-        for attempt in range(max_attempts):
-            response, input_tokens, output_tokens = api.call_api(pregunta)
-            if response:
-                break
-            else:
-                print(f"Intento {attempt + 1} fallido al llamar a la API.")
-        if not response:
-            error_message = "No se pudo obtener respuesta de la API tras 2 intentos."
-            print(error_message)
+        # Paso 3: Procesar con modelo primario
+        print("⌛ Generando código con modelo primario...")
+        final_response, primary_input_tk, primary_output_tk = "", 0, 0
+        for attempt in range(2):
+            final_response, primary_input_tk, primary_output_tk = api.call_primary_model(formatted_pregunta)
+            if final_response: break
+            print(f"Intento {attempt+1} fallido")
+        
+        if not final_response:
+            print("❌ Error: Modelo primario no respondió")
             sys.exit(1)
-        write_response_to_csv(pregunta, response, input_tokens, output_tokens)
+            
+        # Registrar tokens totales
+        total_input = second_input_tk + primary_input_tk
+        total_output = second_output_tk + primary_output_tk
+        write_response_to_csv(formatted_pregunta, final_response, total_input, total_output)
 
-    codes = formater.separar_codigos_por_archivo(response)
-    if not codes:
-        print("No se procesaron códigos a partir de la respuesta.")
+    # Procesar respuesta final
+    if "ERROR FORMATO DE PREGUNTA" in final_response:
+        print("❌ Error en formato de pregunta validada")
         sys.exit(1)
-    print(f"Se encontraron {len(codes)} archivos en la respuesta formateada.")
-
+        
+    codes = formater.separar_codigos_por_archivo(final_response)
+    if not codes:
+        print("❌ No se encontraron códigos válidos")
+        sys.exit(1)
+        
+    print(f"\n✅ Generados {len(codes)} scripts:")
+    for filename in codes.keys():
+        print(f"- {filename}")
+        
     importer.import_codes(codes, simulation_name)
-
-    print("Proceso completado. Simulación creada exitosamente.")
+    print(f"\nSimulación '{simulation_name}' creada exitosamente")
 
 if __name__ == "__main__":
     main()
