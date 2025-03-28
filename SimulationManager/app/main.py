@@ -9,7 +9,9 @@ import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 from dotenv import load_dotenv
 from pathlib import Path
-import psutil  # Se usa para verificar procesos activos
+import psutil  
+import openai
+from openai import error
 
 # ======================================================
 # Función para centrar una ventana en la pantalla
@@ -464,6 +466,146 @@ def delete_simulation(simulation_name):
     populate_simulations()
 
 # ======================================================
+# Ventana de Configuración
+# ======================================================
+def open_config_window():
+    config_win = tk.Toplevel(main_window)
+    config_win.title("Configuración")
+    center_window(config_win, 600, 300)
+    config_win.resizable(False, False)
+    
+    main_config_frame = ttk.Frame(config_win, padding=20)
+    main_config_frame.pack(fill="both", expand=True)
+    
+    # Sección de rutas
+    paths_frame = ttk.LabelFrame(main_config_frame, text="Configuración de Rutas", padding=10)
+    paths_frame.pack(fill="x", pady=5)
+    
+    def create_path_row(parent, label, env_var, is_file=True):
+        row_frame = ttk.Frame(parent)
+        row_frame.pack(fill="x", pady=5)
+        
+        ttk.Label(row_frame, text=label, width=20).pack(side="left")
+        entry = ttk.Entry(row_frame, width=50)
+        
+        # Insertar valor y bloquear edición manual
+        entry.insert(0, os.environ.get(env_var, ""))
+        entry.config(state="readonly")
+        entry.pack(side="left", padx=5)
+        
+        def browse():
+            if is_file:
+                path = filedialog.askopenfilename(title=f"Seleccionar {label}")
+            else:
+                path = filedialog.askdirectory(title=f"Seleccionar {label}")
+            if path:
+                # Habilitar temporalmente para actualizar
+                entry.config(state="normal")
+                entry.delete(0, tk.END)
+                entry.insert(0, path)
+                entry.config(state="readonly")
+        
+        ttk.Button(row_frame, text="Examinar", command=browse).pack(side="left")
+        return entry
+    
+    unity_exe_entry = create_path_row(paths_frame, "Unity Executable", "UNITY_EXECUTABLE", is_file=True)
+    projects_path_entry = create_path_row(paths_frame, "Proyectos Unity", "UNITY_PROJECTS_PATH", is_file=False)
+    
+    # Función de verificación completa
+    def verify_all():
+        results = []
+        
+        # Verificar Unity
+        unity_path = unity_exe_entry.get()
+        if not os.path.exists(unity_path):
+            results.append("❌ Ruta de Unity no existe")
+        else:
+            if "6000.0.32f1" in unity_path:
+                results.append("✅ Versión de Unity correcta")
+            else:
+                results.append("❌ Versión de Unity incorrecta (requerida 6000.0.32f1)")
+        
+        # Verificar APIs
+        try:
+            openai.api_key = os.getenv("OPENAI_API_KEY")
+            
+            # Verificar conexión API
+            try:
+                openai.Model.list()
+                results.append("✅ OpenAI API funciona")
+            except openai.error.AuthenticationError:
+                results.append("❌ OpenAI API: API Key inválida")
+            except Exception as e:
+                results.append(f"❌ Error OpenAI API: {str(e)}")
+            
+            # Verificar modelos
+            models_to_check = [
+                ("Principal", os.getenv("FINE_TUNED_MODEL_NAME")),
+                ("Secundario", os.getenv("2ND_FINE_TUNED_MODEL_NAME"))
+            ]
+            
+            for name, model in models_to_check:
+                try:
+                    openai.Model.retrieve(model)
+                    results.append(f"✅ Modelo {name} válido")
+                except openai.error.InvalidRequestError:
+                    results.append(f"❌ Modelo {name} no encontrado")
+                except Exception as e:
+                    results.append(f"❌ Error modelo {name}: {str(e)}")
+                    
+        except Exception as e:
+            results.append(f"❌ Error general: {str(e)}")
+        
+        # Mostrar resultados
+        result_text = "\n".join(results)
+        messagebox.showinfo("Resultado de Verificaciones", result_text)
+        config_win.destroy()
+    
+    # Botones
+    button_frame = ttk.Frame(main_config_frame)
+    button_frame.pack(pady=10)
+    
+    ttk.Button(button_frame, text="Verificar Todo", command=verify_all).pack(side="left", padx=5)
+    
+    def save_config():
+        new_config = {
+            "UNITY_EXECUTABLE": unity_exe_entry.get(),
+            "UNITY_PROJECTS_PATH": projects_path_entry.get()
+        }
+        
+        # Validar rutas
+        errors = []
+        if not os.path.exists(new_config["UNITY_EXECUTABLE"]):
+            errors.append("La ruta de Unity no es válida")
+        if not os.path.isdir(new_config["UNITY_PROJECTS_PATH"]):
+            errors.append("La ruta de proyectos no es válida")
+        
+        if errors:
+            messagebox.showerror("Errores", "\n".join(errors))
+            return
+        
+        # Mantener las variables existentes de API
+        env_vars = {
+            "OPENAI_API_KEY": os.getenv("OPENAI_API_KEY", ""),
+            "FINE_TUNED_MODEL_NAME": os.getenv("FINE_TUNED_MODEL_NAME", ""),
+            "2ND_FINE_TUNED_MODEL_NAME": os.getenv("2ND_FINE_TUNED_MODEL_NAME", "")
+        }
+        
+        try:
+            with open(".env", "w") as f:
+                f.write(f"UNITY_EXECUTABLE = {new_config['UNITY_EXECUTABLE']}\n")
+                f.write(f"UNITY_PROJECTS_PATH = {new_config['UNITY_PROJECTS_PATH']}\n")
+                for key, value in env_vars.items():
+                    f.write(f"{key} = {value}\n")
+            
+            load_dotenv('.env', override=True)
+            messagebox.showinfo("Éxito", "Configuración guardada correctamente")
+            config_win.destroy()
+        except Exception as e:
+            messagebox.showerror("Error", f"Error al guardar: {str(e)}")
+    
+    ttk.Button(button_frame, text="Guardar", command=save_config).pack(side="left", padx=5)
+# ======================================================
 # INTERFAZ GRÁFICA (GUI)
 # ======================================================
 main_window = tk.Tk()
@@ -491,6 +633,7 @@ archivo_menu = tk.Menu(menubar, tearoff=0)
 archivo_menu.add_command(label="Salir", command=main_window.destroy)
 menubar.add_cascade(label="Archivo", menu=archivo_menu)
 ayuda_menu = tk.Menu(menubar, tearoff=0)
+ayuda_menu.add_command(label="Descargar versión de Unity Editor",command=lambda: subprocess.Popen(["start", "unityhub://6000.0.32f1/b2e806cf271c"], shell=True))
 ayuda_menu.add_command(label="Acerca de", command=lambda: messagebox.showinfo("Acerca de", "Gestor de Simulaciones de Unity\nVersión 1.0"))
 menubar.add_cascade(label="Ayuda", menu=ayuda_menu)
 main_window.config(menu=menubar)
@@ -563,6 +706,10 @@ delete_btn.pack(side="left", padx=5)
 create_btn = ttk.Button(button_frame, text="Crear Simulación", style="Success.TButton",
                           command=on_create_simulation)
 create_btn.pack(side="left", padx=5)
+
+config_btn = ttk.Button(button_frame, text="Configuración", style="Info.TButton",
+                        command=open_config_window)
+config_btn.pack(side="left", padx=5)
 
 status_frame = ttk.Frame(main_window)
 status_frame.pack(fill="x", side="bottom")
