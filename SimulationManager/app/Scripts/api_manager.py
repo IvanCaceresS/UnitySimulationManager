@@ -88,8 +88,7 @@ def main():
         sys.exit(1)
         
     if formatted_pregunta.strip() == "ERROR DE CONTENIDO":
-        print("❌ Pregunta rechazada por contenido inválido")
-        write_response_to_csv(formatted_pregunta, "", second_input_tk, second_output_tk)
+        print("❌ Pregunta rechazada por contenido inválido", file=sys.stderr)  # Escribir en stderr
         sys.exit(7)
 
     print(f"\nPregunta validada y formateada: {formatted_pregunta}")

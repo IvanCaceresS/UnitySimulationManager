@@ -195,13 +195,37 @@ def create_simulation(simulation_name, simulation_description):
     update_status("Creando simulación, por favor espere...")
     disable_all_buttons()
     try:
-        subprocess.run([sys.executable, "./Scripts/api_manager.py", simulation_name, simulation_description], check=True)
+        result = subprocess.run(
+            [sys.executable, "./Scripts/api_manager.py", simulation_name, simulation_description],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=120  # Añadir timeout para evitar bloqueos
+        )
+        
+        # Si llegamos aquí, el proceso terminó con código 0
         update_status("Simulación creada exitosamente.")
         messagebox.showinfo("Éxito", "Simulación creada exitosamente.")
         populate_simulations()
+        
     except subprocess.CalledProcessError as e:
-        messagebox.showerror("Error", f"Error al crear simulación:\n{e}")
-        update_status("Error al crear simulación.")
+        # Manejar específicamente el código de salida 7
+        if e.returncode == 7:
+            error_msg = "ERROR DE CONTENIDO: La simulación debe ser referente a E.Coli (Bacteria) y/o S.Cerevisiae (Levadura)"
+            messagebox.showerror("Error de Validación", error_msg)
+            update_status(error_msg)
+        else:
+            # Mostrar el output real del script para diagnóstico
+            error_output = e.stdout if e.stdout else e.stderr
+            error_msg = f"Error al crear simulación (Código {e.returncode}):\n{error_output}"
+            messagebox.showerror("Error", error_msg)
+            update_status(f"Error código {e.returncode} al crear simulación")
+            
+    except Exception as e:
+        error_msg = f"Error inesperado: {str(e)}"
+        messagebox.showerror("Error", error_msg)
+        update_status("Error crítico al crear simulación")
+        
     finally:
         enable_all_buttons()
 
