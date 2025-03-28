@@ -200,31 +200,46 @@ def create_simulation(simulation_name, simulation_description):
             check=True,
             capture_output=True,
             text=True,
-            timeout=120  # Añadir timeout para evitar bloqueos
+            timeout=120
         )
-        
-        # Si llegamos aquí, el proceso terminó con código 0
         update_status("Simulación creada exitosamente.")
         messagebox.showinfo("Éxito", "Simulación creada exitosamente.")
         populate_simulations()
         
     except subprocess.CalledProcessError as e:
-        # Manejar específicamente el código de salida 7
+        error_msg = ""
+        error_details = ""
+        
+        # Capturar salida de errores
+        error_output = e.stderr if e.stderr else e.stdout
+        
+        # Mapear códigos de error
         if e.returncode == 7:
-            error_msg = "ERROR DE CONTENIDO: La simulación debe ser referente a E.Coli (Bacteria) y/o S.Cerevisiae (Levadura)"
-            messagebox.showerror("Error de Validación", error_msg)
-            update_status(error_msg)
+            error_msg = "ERROR DE CONTENIDO"
+            error_details = "La simulación debe ser referente exclusivamente a:\n- E.Coli (Bacteria)\n- S.Cerevisiae (Levadura)"
+        elif e.returncode == 1:
+            if "ya existe" in error_output:
+                error_msg = "SIMULACIÓN DUPLICADA"
+                error_details = f"Ya existe una simulación con el nombre: '{simulation_name}'"
+            elif "formato de pregunta" in error_output.lower():
+                error_msg = "ERROR DE FORMATEO"
+                error_details = "La pregunta no sigue el formato requerido\n\nEjemplo válido:\n'Simular 2 bacterias E.Coli rojas que se duplican cada 5 minutos'"
+            else:
+                error_msg = "ERROR EN EL PROCESO"
+                error_details = f"Error durante la creación:\n{error_output}"
         else:
-            # Mostrar el output real del script para diagnóstico
-            error_output = e.stdout if e.stdout else e.stderr
-            error_msg = f"Error al crear simulación (Código {e.returncode}):\n{error_output}"
-            messagebox.showerror("Error", error_msg)
-            update_status(f"Error código {e.returncode} al crear simulación")
-            
+            error_msg = "ERROR DESCONOCIDO"
+            error_details = f"Código de error: {e.returncode}\n{error_output}"
+        
+        # Mostrar mensaje completo
+        full_error = f"{error_msg}\n\n{error_details}"
+        messagebox.showerror("Error en la Simulación", full_error)
+        update_status(error_msg)
+        
     except Exception as e:
-        error_msg = f"Error inesperado: {str(e)}"
-        messagebox.showerror("Error", error_msg)
-        update_status("Error crítico al crear simulación")
+        error_msg = f"ERROR CRÍTICO: {str(e)}"
+        messagebox.showerror("Error Inesperado", error_msg)
+        update_status("Error crítico")
         
     finally:
         enable_all_buttons()

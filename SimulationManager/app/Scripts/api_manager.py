@@ -67,14 +67,15 @@ def get_cached_response(pregunta: str) -> str:
 
 def main():
     if len(sys.argv) < 3:
-        print("Uso: api_manager.py <nombre-simulación> <pregunta>")
+        print("Error: Faltan argumentos\nUso correcto: api_manager.py <nombre-simulación> <pregunta>", file=sys.stderr)
         sys.exit(1)
 
     simulation_name = sys.argv[1]
     original_pregunta = sys.argv[2]
     
-    if os.path.exists(os.path.join("..", "Simulations", simulation_name)):
-        print(f"Simulación '{simulation_name}' ya existe")
+    sim_path = os.path.join("..", "Simulations", simulation_name)
+    if os.path.exists(sim_path):
+        print(f"Error: La simulación '{simulation_name}' ya existe en {sim_path}", file=sys.stderr)
         sys.exit(1)
 
     print(f"\nIniciando procesamiento para: {simulation_name}")
@@ -88,7 +89,8 @@ def main():
         sys.exit(1)
         
     if formatted_pregunta.strip() == "ERROR DE CONTENIDO":
-        print("❌ Pregunta rechazada por contenido inválido", file=sys.stderr)  # Escribir en stderr
+        print("ERROR: Contenido inválido detectado", file=sys.stderr)
+        print("La pregunta debe referirse exclusivamente a E.Coli y/o S.Cerevisiae", file=sys.stderr)
         sys.exit(7)
 
     print(f"\nPregunta validada y formateada: {formatted_pregunta}")
@@ -96,12 +98,12 @@ def main():
     # Paso 2: Verificar cache
     cached_response = get_cached_response(formatted_pregunta)
     if cached_response:
-        print("✅ Usando respuesta en caché")
+        print("Usando respuesta en caché")
         write_response_to_csv(formatted_pregunta, cached_response, second_input_tk, second_output_tk)
         final_response = cached_response
     else:
         # Paso 3: Procesar con modelo primario
-        print("⌛ Generando código con modelo primario...")
+        print("Generando código con modelo primario...")
         final_response, primary_input_tk, primary_output_tk = "", 0, 0
         for attempt in range(2):
             final_response, primary_input_tk, primary_output_tk = api.call_primary_model(formatted_pregunta)
@@ -109,7 +111,7 @@ def main():
             print(f"Intento {attempt+1} fallido")
         
         if not final_response:
-            print("❌ Error: Modelo primario no respondió")
+            print("Error: Modelo primario no respondió")
             sys.exit(1)
             
         # Registrar tokens totales
@@ -119,15 +121,15 @@ def main():
 
     # Procesar respuesta final
     if "ERROR FORMATO DE PREGUNTA" in final_response:
-        print("❌ Error en formato de pregunta validada")
+        print("Error en formato de pregunta validada")
         sys.exit(1)
         
     codes = formater.separar_codigos_por_archivo(final_response)
     if not codes:
-        print("❌ No se encontraron códigos válidos")
+        print("No se encontraron códigos válidos")
         sys.exit(1)
         
-    print(f"\n✅ Generados {len(codes)} scripts:")
+    print(f"\n Generados {len(codes)} scripts:")
     for filename in codes.keys():
         print(f"- {filename}")
         
