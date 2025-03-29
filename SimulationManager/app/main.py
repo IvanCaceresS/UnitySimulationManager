@@ -661,7 +661,7 @@ def open_config_window():
 # ======================================================
 main_window = tk.Tk()
 main_window.iconbitmap("icono.ico")
-main_window.title("Gestor de Simulaciones de Unity")
+main_window.title("Unity Simulation Manager")
 center_window(main_window, 700, 500)
 main_window.resizable(False, False)
 
@@ -681,23 +681,23 @@ style.map("Reload.TButton", background=[("active", "#7B1FA2")])
 
 menubar = tk.Menu(main_window)
 archivo_menu = tk.Menu(menubar, tearoff=0)
-archivo_menu.add_command(label="Salir", command=main_window.destroy)
+archivo_menu.add_command(label="Exit", command=main_window.destroy)
 menubar.add_cascade(label="Archivo", menu=archivo_menu)
 ayuda_menu = tk.Menu(menubar, tearoff=0)
 ayuda_menu.add_command(label="Descargar versión de Unity Editor",command=lambda: subprocess.Popen(["start", "unityhub://6000.0.32f1/b2e806cf271c"], shell=True))
-ayuda_menu.add_command(label="Acerca de", command=lambda: messagebox.showinfo("Acerca de", "Gestor de Simulaciones de Unity\nVersión 1.0"))
-menubar.add_cascade(label="Ayuda", menu=ayuda_menu)
+ayuda_menu.add_command(label="About this", command=lambda: messagebox.showinfo("Acerca de", "Unity Simulation Manager\nVersion 1.0"))
+menubar.add_cascade(label="Help", menu=ayuda_menu)
 main_window.config(menu=menubar)
 
 header_frame = ttk.Frame(main_window, padding=(10, 10))
 header_frame.pack(fill="x")
-header_label = ttk.Label(header_frame, text="Gestor de Simulaciones de Unity", font=("Segoe UI", 20, "bold"), foreground="#2C3E50")
+header_label = ttk.Label(header_frame, text="Unity Simulation Manager", font=("Times New Roman", 20, "bold"), foreground="#000000")
 header_label.pack(side="top")
 
 main_frame = ttk.Frame(main_window, padding=10)
 main_frame.pack(expand=True, fill="both")
 
-select_label = ttk.Label(main_frame, text="Seleccione una simulación:", font=("Segoe UI", 14))
+select_label = ttk.Label(main_frame, text="Select a simulation:", font=("Segoe UI", 14))
 select_label.pack(pady=(10, 5))
 
 tree_frame = ttk.Frame(main_frame)
