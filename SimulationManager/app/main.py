@@ -485,6 +485,18 @@ def delete_simulation(simulation_name):
         update_status("Eliminación cancelada.")
         return
 
+    # Verificar si la simulación a eliminar es la que está cargada
+    if os.path.exists(SIMULATION_LOADED_FILE):
+        try:
+            with open(SIMULATION_LOADED_FILE, 'r') as f:
+                loaded_sim = f.read().strip()
+            if loaded_sim == simulation_name:
+                os.remove(SIMULATION_LOADED_FILE)
+                update_status(f"Archivo de simulación cargada eliminado: {SIMULATION_LOADED_FILE}")
+        except Exception as e:
+            messagebox.showerror("Error", f"Error al verificar/eliminar simulation_loaded.txt: {str(e)}")
+            return
+
     sim_path = os.path.join(SIMULATIONS_DIR, simulation_name)
     if os.path.exists(sim_path):
         try:
