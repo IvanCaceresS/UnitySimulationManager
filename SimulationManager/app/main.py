@@ -200,7 +200,7 @@ def create_simulation(simulation_name, simulation_description):
             check=True,
             capture_output=True,
             text=True,
-            timeout=120
+            timeout=300
         )
         update_status("Simulación creada exitosamente.")
         messagebox.showinfo("Éxito", "Simulación creada exitosamente.")
