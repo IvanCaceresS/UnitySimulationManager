@@ -14,6 +14,7 @@ public class Right_GUI : MonoBehaviour
     private string initialSceneName;
     private static float LowDeltaTimeLimit = 0.01f;
     private static float HighDeltaTimeLimit = 40.00f;
+    private string speedMultiplierInput = "1.00"; // Input del usuario para el multiplicador
 
     // Estilos de GUI (se inicializan en OnGUI)
     private GUIStyle buttonStyle;
@@ -169,44 +170,49 @@ public class Right_GUI : MonoBehaviour
         GUILayout.BeginVertical();
         GUILayout.FlexibleSpace();
         
+        // Texto explicativo con nuevo rango basado en multiplicador de velocidad
         GUILayout.BeginHorizontal();
         GUILayout.FlexibleSpace();
-        GUILayout.Label($"Ingrese deltaTime ({LowDeltaTimeLimit} - {HighDeltaTimeLimit}):", centeredLabelStyle, GUILayout.Width(280));
+        GUILayout.Label($"Seleccione velocidad de simulación (0.6x - 2400x):", centeredLabelStyle, GUILayout.Width(280));
         GUILayout.FlexibleSpace();
         GUILayout.EndHorizontal();
 
+        // Campo de texto para el multiplicador de velocidad
         GUILayout.BeginHorizontal();
         GUILayout.FlexibleSpace();
-        deltaTimeInput = GUILayout.TextField(deltaTimeInput, GUILayout.Width(50));
+        speedMultiplierInput = GUILayout.TextField(speedMultiplierInput, GUILayout.Width(50));
         GUILayout.FlexibleSpace();
         GUILayout.EndHorizontal();
 
+        // Slider para el multiplicador de velocidad
         GUILayout.BeginHorizontal();
         GUILayout.FlexibleSpace();
-        float parsedDeltaTime;
-        if (!float.TryParse(deltaTimeInput, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out parsedDeltaTime))
-            parsedDeltaTime = 1.00f;
-        parsedDeltaTime = Mathf.Clamp(parsedDeltaTime, LowDeltaTimeLimit, HighDeltaTimeLimit);
-        parsedDeltaTime = GUILayout.HorizontalSlider(parsedDeltaTime, LowDeltaTimeLimit, HighDeltaTimeLimit, GUILayout.Width(280));
-        deltaTimeInput = parsedDeltaTime.ToString("F2", System.Globalization.CultureInfo.InvariantCulture);
+        float parsedSpeedMultiplier;
+        if (!float.TryParse(speedMultiplierInput, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out parsedSpeedMultiplier))
+            parsedSpeedMultiplier = 1.0f; // Valor por defecto 1x si hay error
+        
+        parsedSpeedMultiplier = Mathf.Clamp(parsedSpeedMultiplier, 0.6f, 2400f);
+        parsedSpeedMultiplier = GUILayout.HorizontalSlider(parsedSpeedMultiplier, 0.6f, 2400f, GUILayout.Width(280));
+        speedMultiplierInput = parsedSpeedMultiplier.ToString("F2", System.Globalization.CultureInfo.InvariantCulture);
         GUILayout.FlexibleSpace();
         GUILayout.EndHorizontal();
 
+        // Botón de inicio con conversión a deltaTime
         GUILayout.BeginHorizontal();
         GUILayout.FlexibleSpace();
-        if (GUILayout.Button("Start Simulation", GUILayout.Width(280)))
+        if (GUILayout.Button("Iniciar Simulación", GUILayout.Width(280)))
         {
-            GameStateManager.SetDeltaTime(parsedDeltaTime);
+            float deltaTime = parsedSpeedMultiplier / 60f; // Conversión a deltaTime
+            deltaTime = Mathf.Clamp(deltaTime, LowDeltaTimeLimit, HighDeltaTimeLimit);
+            
+            GameStateManager.SetDeltaTime(deltaTime);
             showDeltaTimeWindow = false;
             isPaused = false;
             Time.timeScale = 1;
             GameStateManager.SetPauseState(isPaused);
 
             Left_GUI leftGUI = FindFirstObjectByType<Left_GUI>();
-            if (leftGUI != null)
-            {
-                leftGUI.StartSimulation();
-            }
+            if (leftGUI != null) leftGUI.StartSimulation();
         }
         GUILayout.FlexibleSpace();
         GUILayout.EndHorizontal();
