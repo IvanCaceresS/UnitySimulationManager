@@ -12,6 +12,7 @@ from dotenv import load_dotenv
 from pathlib import Path
 import psutil
 import openai
+import math
 try:
     from openai import error as openai_error # OpenAI < 1.0
 except ImportError:
@@ -319,16 +320,107 @@ def delete_simulation(sim_name):
 # ======================================================
 # Unity Batch Execution & Progress Monitoring
 # ======================================================
+# --- Función para formatear segundos (útil para ETA) ---
+def format_time(seconds):
+    if seconds is None or seconds < 0 or math.isinf(seconds) or math.isnan(seconds):
+        return "--:--:--"
+    if seconds == 0:
+        return "0s"
+
+    seconds = int(seconds)
+    hours, rem = divmod(seconds, 3600)
+    minutes, secs = divmod(rem, 60)
+
+    if hours > 0:
+        return f"{hours:02d}:{minutes:02d}:{secs:02d}"
+    elif minutes > 0:
+        return f"{minutes:02d}:{secs:02d}"
+    else:
+        return f"{secs}s"
+    
 def monitor_unity_progress(stop_event, operation_tag):
-    if not SIMULATION_PROJECT_PATH or not os.path.exists(SIMULATION_PROJECT_PATH): return
-    last_update = 0
+    if not SIMULATION_PROJECT_PATH or not os.path.exists(SIMULATION_PROJECT_PATH):
+        print(f"\nAdvertencia: La ruta '{SIMULATION_PROJECT_PATH}' no existe al iniciar el monitoreo.")
+        return
+
+    TARGET_SIZE_MB = 3000.0
+    BYTES_PER_MB = 1024 * 1024
+    TARGET_SIZE_BYTES = TARGET_SIZE_MB * BYTES_PER_MB
+
+    last_update_time = 0
+    start_time = time.time()
+    initial_size_bytes = 0
+    eta_str = "Calculating..." # Valor inicial para ETA
+
+    try:
+        # Obtenemos tamaño inicial para cálculos de tasa
+        initial_size_bytes = get_folder_size(SIMULATION_PROJECT_PATH)
+    except Exception as e:
+        print(f"\nError al obtener tamaño inicial para '{SIMULATION_PROJECT_PATH}': {e}")
+        # Decide si continuar con tamaño 0 o retornar
+        initial_size_bytes = 0 # Continuar asumiendo 0 si falla
+
+    initial_size_mb = initial_size_bytes / BYTES_PER_MB
+    print(f"[{operation_tag}] Iniciando monitoreo. Tamaño inicial: {initial_size_mb:.1f}MB. Objetivo: {TARGET_SIZE_MB:.0f}MB")
+
     while not stop_event.is_set():
         now = time.time()
-        if now - last_update > 1.5:
-            try: size_mb = get_folder_size(SIMULATION_PROJECT_PATH)/(1024*1024); update_status(f"[{operation_tag}] Processing... ({size_mb:.1f}MB)")
-            except: pass
-            last_update = now
+        # Comprobar tamaño cada 1.5 segundos
+        if now - last_update_time > 1.5:
+            current_size_bytes = 0
+            try:
+                current_size_bytes = get_folder_size(SIMULATION_PROJECT_PATH)
+                current_size_mb = current_size_bytes / BYTES_PER_MB
+                elapsed_time = now - start_time
+                size_increase_bytes = current_size_bytes - initial_size_bytes
+
+                # --- Cálculo del ETA ---
+                if elapsed_time > 5 and size_increase_bytes > 1024: # Esperar > 5s y crecimiento > 1KB para calcular
+                    # Tasa de crecimiento en Bytes por segundo
+                    rate_bytes_per_sec = size_increase_bytes / elapsed_time
+                    remaining_bytes = TARGET_SIZE_BYTES - current_size_bytes
+
+                    if rate_bytes_per_sec > 0 and remaining_bytes > 0:
+                        eta_seconds = remaining_bytes / rate_bytes_per_sec
+                        eta_str = f"ETA: {format_time(eta_seconds)}"
+                    elif remaining_bytes <= 0:
+                        eta_str = "ETA: Completed"
+                        # Opcional: podrías querer detener el monitoreo aquí
+                        # stop_event.set() # Descomenta si quieres que pare al llegar
+                    else:
+                        # No hay crecimiento positivo o ya pasó el objetivo (pero rate=0?)
+                        eta_str = "ETA: --" # O "Stalled"
+                elif elapsed_time <= 5:
+                     eta_str = "ETA: Calculating..." # Aún muy pronto
+                else: # Hubo tiempo pero sin crecimiento significativo
+                     eta_str = "ETA: --"
+
+
+                # --- Actualización del Estado ---
+                progress_percent = (current_size_mb / TARGET_SIZE_MB) * 100 if TARGET_SIZE_MB > 0 else 0
+                # Limitar el porcentaje a 100% para la visualización
+                display_percent = min(progress_percent, 100.0)
+
+                status_msg = (f"[{operation_tag}] {current_size_mb:.1f}/{TARGET_SIZE_MB:.0f}MB "
+                              f"({display_percent:.1f}%) - {eta_str}      ") # Espacios para limpiar línea
+                update_status(status_msg)
+
+            except Exception as e:
+                # Captura errores durante la obtención de tamaño o cálculo de ETA
+                # Mantén el último ETA conocido o muestra un error
+                error_msg = f"Error reading size: {e}"[:30] # Limitar longitud del error
+                update_status(f"[{operation_tag}] {error_msg}... - {eta_str}      ")
+                # 'pass' ya no está, el error se muestra pero el bucle continúa
+
+            last_update_time = now # Actualizar el tiempo de la última comprobación válida o intento
+
+        # Espera corta para no saturar la CPU y permitir que stop_event funcione
+        # time.sleep(0.5) es suficiente si no usas threading.Event.wait()
         time.sleep(0.5)
+
+    # Mensaje final al salir del bucle
+    final_size_mb = get_folder_size(SIMULATION_PROJECT_PATH) / BYTES_PER_MB
+    print(f"\n[{operation_tag}] Monitoreo finalizado. Tamaño final: {final_size_mb:.1f}MB")
 
 def run_unity_batchmode(exec_method, op_name, log_file, timeout=600, extra_args=None):
     if not all([unity_path_ok, unity_version_ok, unity_projects_path_ok, SIMULATION_PROJECT_PATH]):
