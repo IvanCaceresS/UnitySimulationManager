@@ -653,7 +653,10 @@ def open_config_window():
 # ======================================================
 def populate_simulations():
     if not initial_verification_complete: return
-    for item in sim_tree.get_children(): sim_tree.delete(item)
+    for item in sim_tree.get_children():
+        try: sim_tree.delete(item)
+        except tk.TclError: pass # Ignorar si ya no existe
+
     update_status("Searching for simulations...")
     simulations = get_simulations()
     global last_simulation_loaded
@@ -663,23 +666,32 @@ def populate_simulations():
         for i, sim in enumerate(simulations):
             is_loaded = (sim["name"] == last_simulation_loaded)
             row_tag = "evenrow" if i % 2 == 0 else "oddrow"
-            item_tags = [row_tag, sim["name"]] # Basic tags
-            if is_loaded: item_tags.append("loaded")
-            # Add tags for icon colors (applied to the whole item/row)
-            item_tags.extend(["IconLoadTag", "IconDeleteTag"])
+            # APLICAR LOS TAGS CORRECTOS
+            item_tags = [row_tag] # Tag base par/impar
+            if is_loaded:
+                item_tags.append("loaded") # Añadir tag 'loaded' si corresponde
 
-            # New column order: name, created, last_used, loaded_indicator, load_icon, delete_icon
-            sim_tree.insert("", "end", iid=sim["name"],
-                              values=(sim["name"], sim["creation"], sim["last_opened"],
-                                      loaded_indicator_text if is_loaded else "",
-                                      play_icon_text, delete_icon_text),
-                              tags=tuple(item_tags))
+            try:
+                sim_tree.insert("", "end", iid=sim["name"],
+                                values=(sim["name"], sim["creation"], sim["last_opened"],
+                                        loaded_indicator_text if is_loaded else "",
+                                        play_icon_text, delete_icon_text),
+                                tags=tuple(item_tags)) # Usar los tags calculados
+            except tk.TclError as e:
+                print(f"Error inserting {sim['name']}: {e}")
 
-        sort_column(sim_tree, "nombre", False)
-        update_status(f"List updated ({len(simulations)}).")
-    else: update_status("No simulations found.")
+
+        # Ordenar después de poblar
+        # Encuentra la columna por la que ordenar inicialmente (ej. 'nombre')
+        default_sort_col = "nombre"
+        if default_sort_col in sort_order:
+            sort_column(sim_tree, default_sort_col, sort_order[default_sort_col])
+
+        update_status(f"List updated ({len(simulations)} found).")
+    else:
+        update_status("No simulations found.")
     update_button_states()
-
+    
 def update_button_states():
     if 'main_window' not in globals() or not main_window.winfo_exists() or is_build_running : return # Check build flag
     if not initial_verification_complete: state = "disabled"; reload_state = "normal"
@@ -854,29 +866,37 @@ center_window(main_window, 800, 550)
 main_window.resizable(True, True)
 
 # --- Styles ---
-style = ttk.Style(main_window); style.theme_use("clam")
+style = ttk.Style(main_window)
+style.theme_use("clam")
+
+# Configurar estilos para Widgets Generales (Botones, Labels, etc.)
 style.configure("TButton", font=("Segoe UI", 10), padding=5)
-style.configure("Treeview", font=("Segoe UI", 10), rowheight=25)
-style.configure("Treeview.Heading", font=("Segoe UI", 10, "bold"))
-style.configure("Info.TButton", foreground="white", background="#5B6EE1"); style.map("Info.TButton", background=[("active", "#4759c7"), ("disabled", "#B0B9E8")])
-style.configure("Success.TButton", foreground="white", background="#4CAF50"); style.map("Success.TButton", background=[("active", "#43A047"), ("disabled", "#A5D6A7")])
-style.configure("Danger.TButton", foreground="white", background="#F44336"); style.map("Danger.TButton", background=[("active", "#E53935"), ("disabled", "#EF9A9A")])
-style.configure("Graph.TButton", foreground="white", background="#009688"); style.map("Graph.TButton", background=[("active", "#00796B"), ("disabled", "#80CBC4")])
-style.configure("Reload.TButton", foreground="white", background="#9C27B0"); style.map("Reload.TButton", background=[("active", "#7B1FA2"), ("disabled", "#CE93D8")])
-style.configure("TLabel", font=("Segoe UI", 10)); style.configure("Status.TLabel", font=("Segoe UI", 9))
-# Treeview row/tag styles
-style.configure("oddrow.Treeview", background="#F0F0F0") # Slightly lighter grey
-style.configure("evenrow.Treeview", background="#FFFFFF")
-style.configure("loaded.Treeview", background="#E0F2E0", font=("Segoe UI", 10, "bold")) # Lighter green, bold
-# Configure TAGS used for icon colors (applied to items/rows)
-style.configure("IconLoadTag.Treeview", foreground="#008000") # Dark Green
-style.configure("IconDeleteTag.Treeview", foreground="#CC0000") # Dark Red
+style.configure("Treeview", font=("Segoe UI", 10), rowheight=25) # Estilo base del Treeview
+style.configure("Treeview.Heading", font=("Segoe UI", 10, "bold")) # Estilo cabeceras
+style.configure("Info.TButton", foreground="white", background="#5B6EE1")
+style.map("Info.TButton", background=[("active", "#4759c7"), ("disabled", "#B0B9E8")])
+style.configure("Success.TButton", foreground="white", background="#4CAF50")
+style.map("Success.TButton", background=[("active", "#43A047"), ("disabled", "#A5D6A7")])
+style.configure("Danger.TButton", foreground="white", background="#F44336")
+style.map("Danger.TButton", background=[("active", "#E53935"), ("disabled", "#EF9A9A")])
+style.configure("Graph.TButton", foreground="white", background="#009688")
+style.map("Graph.TButton", background=[("active", "#00796B"), ("disabled", "#80CBC4")])
+style.configure("Reload.TButton", foreground="white", background="#9C27B0")
+style.map("Reload.TButton", background=[("active", "#7B1FA2"), ("disabled", "#CE93D8")])
+style.configure("TLabel", font=("Segoe UI", 10))
+style.configure("Status.TLabel", font=("Segoe UI", 9))
 
 # --- Menu ---
 menubar = tk.Menu(main_window)
-fmenu = tk.Menu(menubar,tearoff=0); fmenu.add_command(label="Settings...", command=open_config_window); fmenu.add_command(label="Verify Config", command=lambda: perform_verification(show_results_box=True)); fmenu.add_separator(); fmenu.add_command(label="Exit", command=main_window.quit); menubar.add_cascade(label="File", menu=fmenu)
-hmenu = tk.Menu(menubar,tearoff=0); hmenu.add_command(label="Download Unity (6000.0.32f1)", command=lambda: webbrowser.open("unityhub://6000.0.32f1/b2e806cf271c")); hmenu.add_separator(); hmenu.add_command(label="About...", command=lambda: messagebox.showinfo("About", "Unity Simulation Manager\nVersion 1.6")); menubar.add_cascade(label="Help", menu=hmenu)
+fmenu = tk.Menu(menubar,tearoff=0); fmenu.add_command(label="Settings...", command=open_config_window); 
+fmenu.add_command(label="Verify Config", command=lambda: perform_verification(show_results_box=True)); 
+fmenu.add_separator(); fmenu.add_command(label="Exit", command=main_window.quit); 
+menubar.add_cascade(label="File", menu=fmenu)
+hmenu = tk.Menu(menubar,tearoff=0); hmenu.add_command(label="Download Unity (6000.0.32f1)", command=lambda: webbrowser.open("unityhub://6000.0.32f1/b2e806cf271c")); 
+hmenu.add_separator(); hmenu.add_command(label="About...", command=lambda: messagebox.showinfo("About", "Unity Simulation Manager\nVersion 1.6")); 
+menubar.add_cascade(label="Help", menu=hmenu)
 main_window.config(menu=menubar)
+
 
 # --- Header ---
 hdr_f = ttk.Frame(main_window, padding=(10, 10)); hdr_f.pack(fill="x")
@@ -884,43 +904,50 @@ hdr_l = ttk.Label(hdr_f, text="Unity Simulation Manager", font=("Times New Roman
 
 # --- Main Frame ---
 main_f = ttk.Frame(main_window, padding=10); main_f.pack(expand=True, fill="both")
-main_f.columnconfigure(0, weight=1); main_f.rowconfigure(0, weight=1) # Changed row index for Treeview
-# Removed sel_l label
+main_f.columnconfigure(0, weight=1); main_f.rowconfigure(0, weight=1)
 
 # --- Treeview Setup ---
-tree_f = ttk.Frame(main_f); tree_f.grid(row=0, column=0, sticky="nsew", padx=5, pady=(0,5)) # Changed row index, removed top padding
+tree_f = ttk.Frame(main_f); tree_f.grid(row=0, column=0, sticky="nsew", padx=5, pady=(0,5))
 tree_f.columnconfigure(0, weight=1); tree_f.rowconfigure(0, weight=1)
-# Updated column order
 columns = ("nombre", "creacion", "ultima", "col_loaded", "col_load", "col_delete")
 sim_tree = ttk.Treeview(tree_f, columns=columns, show="headings", selectmode="browse")
-# Column setup (Updated order, English headings)
+
+# Column setup (Usar texto en cabeceras de iconos si se desea)
 sim_tree.heading("nombre", text="Simulation Name"); sim_tree.column("nombre", width=250, anchor="w", stretch=tk.YES)
 sim_tree.heading("creacion", text="Created"); sim_tree.column("creacion", width=110, anchor="center", stretch=tk.NO)
 sim_tree.heading("ultima", text="Last Used"); sim_tree.column("ultima", width=110, anchor="center", stretch=tk.NO)
 sim_tree.heading("col_loaded", text="✓", anchor="center"); sim_tree.column("col_loaded", width=25, stretch=tk.NO, anchor="center")
 sim_tree.heading("col_load", text=" Load", anchor="center"); sim_tree.column("col_load", width=40, stretch=tk.NO, anchor="center")
 sim_tree.heading("col_delete", text="Del", anchor="center"); sim_tree.column("col_delete", width=40, stretch=tk.NO, anchor="center")
-# Sorting config (adjust for new column order)
+
+# Sorting config (sin cambios necesarios aquí)
 sort_order = {col: False for col in columns if col not in ["col_load", "col_delete", "col_loaded"]}
 def sort_column(tree, col, reverse):
+    # ... (tu función sort_column completa) ...
     if col in ["col_load", "col_delete", "col_loaded"]: return
     global sort_order; data = [(tree.set(item, col), item) for item in tree.get_children('')]
     def conv_date(v): return 0 if v in ("???", "Never") else time.mktime(time.strptime(v, "%y-%m-%d %H:%M")) if v else 0
     try: data.sort(key=lambda t: conv_date(t[0]) if col in ("creacion", "ultima") else t[0].lower(), reverse=reverse)
     except: data.sort(key=lambda t: t[0].lower(), reverse=reverse) # Fallback sort
     for i, (_, item) in enumerate(data): tree.move(item, '', i)
-    sort_order[col] = reverse; tree.heading(col, command=lambda c=col: sort_column(tree, c, not reverse))
+    sort_order[col] = reverse
+    # Actualizar el comando para la cabecera para invertir la próxima vez
+    tree.heading(col, command=lambda c=col: sort_column(tree, c, not reverse)) # <--- Asegúrate que el comando se actualiza
+
 for col in columns:
-    if col not in ["col_load", "col_delete", "col_loaded"]: sim_tree.heading(col, command=lambda c=col: sort_column(sim_tree, c, sort_order[c]))
+    if col not in ["col_load", "col_delete", "col_loaded"]:
+        current_heading_text = sim_tree.heading(col)['text'] # Leer texto actual
+        sim_tree.heading(col, text=current_heading_text, command=lambda c=col: sort_column(sim_tree, c, False)) # Comando inicial para ordenar Asc
+
 # Tag configuration (applied in populate_simulations)
 sim_tree.tag_configure('oddrow', background='#F0F0F0')
 sim_tree.tag_configure('evenrow', background='#FFFFFF')
-sim_tree.tag_configure('loaded', background='#E0F2E0', font=('Segoe UI', 10, 'bold'))
-sim_tree.tag_configure('IconLoadTag', foreground='#008000') # Dark Green
-sim_tree.tag_configure('IconDeleteTag', foreground='#CC0000') # Dark Red
+sim_tree.tag_configure('loaded', background='#E0F2E0', font=('Segoe UI', 10))
 
 sim_tree.grid(row=0, column=0, sticky="nsew")
 scroll = ttk.Scrollbar(tree_f, orient="vertical", command=sim_tree.yview); scroll.grid(row=0, column=1, sticky="ns"); sim_tree.config(yscrollcommand=scroll.set)
+
+# Event Bindings
 sim_tree.bind('<<TreeviewSelect>>', lambda e: update_button_states())
 sim_tree.bind("<Button-1>", handle_tree_click)
 sim_tree.bind("<Motion>", handle_tree_motion)
@@ -939,16 +966,20 @@ status_label = ttk.Label(status_f, text="Initializing...", anchor="w", style="St
 
 # ======================================================
 # App Initialization
-# ======================================================
+# ====================================================== 
 if __name__ == "__main__":
-    update_button_states()
+    update_button_states() # Actualiza estado inicial botones
     update_status("Performing initial verification...")
+    # Iniciar verificación en hilo (que eventualmente llamará a populate_simulations)
     threading.Thread(target=perform_verification, args=(False, True), daemon=True).start()
+
     def on_closing():
+        # ... (tu código on_closing) ...
         if is_build_running: # Prevent closing during build
             messagebox.showwarning("Build in Progress", "Please wait for the current build to finish before closing.")
             return
         if messagebox.askokcancel("Exit", "Exit Simulation Manager?", icon='question'):
-             update_status("Closing..."); ensure_unity_closed(); main_window.destroy()
+            update_status("Closing..."); ensure_unity_closed(); main_window.destroy()
+
     main_window.protocol("WM_DELETE_WINDOW", on_closing)
     main_window.mainloop()
