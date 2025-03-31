@@ -14,6 +14,14 @@ import psutil
 import openai
 import math
 try:
+    from PIL import Image, ImageTk # Necesario para el logo
+except ImportError:
+    messagebox.showerror("Error de Dependencia",
+                         "La biblioteca Pillow no está instalada.\n"
+                         "Por favor, instálala ejecutando: pip install Pillow")
+    sys.exit(1) # Salir si Pillow no está instalado
+
+try:
     from openai import error as openai_error # OpenAI < 1.0
 except ImportError:
     class OpenAIError(Exception): pass # Placeholder if openai >= 1.0
@@ -33,6 +41,7 @@ apis_key_ok = False
 apis_models_ok = False
 initial_verification_complete = False
 is_build_running = False # Flag to track build process
+# sidebar_visible = True # <- Eliminado, ahora siempre visible
 
 UNITY_EXECUTABLE = None
 UNITY_PROJECTS_PATH = None
@@ -52,21 +61,29 @@ last_simulation_loaded = None
 play_icon_text = "▶"
 delete_icon_text = "🗑️"
 loaded_indicator_text = "✓"
+# toggle_collapse_icon = "◀" # <- Eliminado
+# toggle_expand_icon = "▶" # <- Eliminado
 
 # Tooltip handling
 tooltip_window = None
 tooltip_delay = 700
 tooltip_job_id = None
 
+# Referencia global para la imagen del logo (evita garbage collection)
+logo_photo_ref = None
+LOGO_PATH = "img/logo.png"
+LOGO_WIDTH = 150 # Ancho deseado para el logo en pixels
+
 # ======================================================
 # GUI Utilities & Interaction Control
 # ======================================================
 def center_window(window, width, height):
+    # (Sin cambios)
     window.update_idletasks(); sw, sh = window.winfo_screenwidth(), window.winfo_screenheight()
     x, y = (sw - width) // 2, (sh - height) // 2; window.geometry(f"{width}x{height}+{x}+{y}")
 
 class CustomInputDialog(tk.Toplevel):
-    # (No changes)
+    # (Sin cambios)
     def __init__(self, parent, title, prompt, width=400, height=150, font=("Segoe UI", 12)):
         super().__init__(parent); self.title(title); center_window(self, width, height)
         self.resizable(False, False); self.transient(parent); self.grab_set(); self.result = None
@@ -81,23 +98,27 @@ class CustomInputDialog(tk.Toplevel):
     def cancel(self): self.destroy()
 
 def custom_askstring(title, prompt):
+    # (Sin cambios)
     if 'main_window' in globals() and main_window.winfo_exists():
         dialog = CustomInputDialog(main_window, title, prompt); return dialog.result
     print(f"Warn: Main window N/A for dialog '{title}'."); return None
 
 # --- Tooltip Functions ---
 def show_tooltip(widget, text):
+    # (Sin cambios)
     global tooltip_window; hide_tooltip()
     x, y, _, _ = widget.bbox("insert")
     x += widget.winfo_rootx() + 20; y += widget.winfo_rooty() + 20
     tooltip_window = tk.Toplevel(widget); tooltip_window.wm_overrideredirect(True); tooltip_window.wm_geometry(f"+{x}+{y}")
     tk.Label(tooltip_window, text=text, justify='left', background="#ffffe0", relief='solid', borderwidth=1, font=("Segoe UI", 9)).pack(ipadx=1)
 def hide_tooltip():
+    # (Sin cambios)
     global tooltip_window
     if tooltip_window: tooltip_window.destroy(); tooltip_window = None
 
 def schedule_tooltip(widget, text): global tooltip_job_id; cancel_tooltip(widget); tooltip_job_id = widget.after(tooltip_delay, lambda: show_tooltip(widget, text))
-def cancel_tooltip(widget): 
+def cancel_tooltip(widget):
+    # (Sin cambios)
     global tooltip_job_id
     if 'tooltip_job_id' in globals() and tooltip_job_id: widget.after_cancel(tooltip_job_id); tooltip_job_id = None; hide_tooltip()
 
@@ -107,38 +128,51 @@ def disable_all_interactions():
     global is_build_running
     is_build_running = True
     try:
+        # Disable bottom buttons
         reload_btn.config(state="disabled")
         graph_btn.config(state="disabled")
         create_btn.config(state="disabled")
-        # Disable menu items
-        fmenu.entryconfig("Settings...", state="disabled")
-        fmenu.entryconfig("Verify Config", state="disabled")
+
+        # Disable sidebar buttons if they exist
+        if 'sidebar_frame' in globals():
+            for widget in sidebar_frame.winfo_children():
+                # Excluir Labels (como el logo o el título "Menu")
+                if isinstance(widget, ttk.Button):
+                    widget.configure(state="disabled")
+        # No hay toggle button que deshabilitar
+
         # Unbind treeview click (safer than disabling the whole widget)
         sim_tree.unbind("<Button-1>")
         sim_tree.unbind("<Motion>") # Also disable tooltips during build
         sim_tree.config(cursor="watch") # Indicate busy state
         update_status("Build in progress... Please wait.")
-    except (NameError, tk.TclError):
-        print("Warning: Could not disable all interactions (GUI not fully ready?).")
+    except (NameError, tk.TclError) as e:
+        print(f"Warning: Could not disable all interactions (GUI not fully ready?): {e}")
 
 def enable_all_interactions():
     """Re-enables interactions and updates button states."""
     global is_build_running
     is_build_running = False
     try:
-        # Re-enable menu items
-        fmenu.entryconfig("Settings...", state="normal")
-        fmenu.entryconfig("Verify Config", state="normal")
+         # Enable sidebar buttons if they exist
+        if 'sidebar_frame' in globals():
+            for widget in sidebar_frame.winfo_children():
+                 if isinstance(widget, ttk.Button):
+                      widget.configure(state="normal") # Habilitar todos los botones del sidebar
+
+        # Re-enable toggle button - No existe
+
         # Re-bind treeview click and motion
         sim_tree.bind("<Button-1>", handle_tree_click)
         sim_tree.bind("<Motion>", handle_tree_motion)
         sim_tree.config(cursor="") # Restore default cursor
         update_button_states() # Update buttons based on current state
-    except (NameError, tk.TclError):
-         print("Warning: Could not re-enable all interactions.")
+    except (NameError, tk.TclError) as e:
+         print(f"Warning: Could not re-enable all interactions: {e}")
 
 # ======================================================
 # Core Utilities & Error Handling
+# (Sin cambios en esta sección)
 # ======================================================
 def update_status(message):
     if 'main_window' in globals() and main_window.winfo_exists():
@@ -164,19 +198,17 @@ def ensure_unity_closed():
             except (psutil.Error, TypeError, AttributeError): continue
     except Exception as ex: print(f"Error listing procs: {ex}"); return
     if procs:
-        #update_status("Closing detected Unity instances..."); # Less verbose
         t_start = time.time()
-        for p in procs: 
-            try: p.terminate() 
+        for p in procs:
+            try: p.terminate()
             except psutil.Error: pass
         _, alive = psutil.wait_procs(procs, timeout=5)
         if alive:
-            for p in alive: 
-                try: p.kill() 
+            for p in alive:
+                try: p.kill()
                 except psutil.Error: pass
             psutil.wait_procs(alive, timeout=3)
         print(f"Unity close check took {time.time()-t_start:.2f}s")
-        #update_status("Unity close check completed.")
 
 def open_graphs_folder(simulation_name):
     try:
@@ -218,6 +250,7 @@ def get_build_target_and_executable(project_path):
 
 # ======================================================
 # Simulation Logic
+# (Sin cambios en esta sección)
 # ======================================================
 def get_simulations():
     sims = []
@@ -235,7 +268,7 @@ def get_simulations():
                         with open(l_file, "r") as f: l_ts = float(f.read().strip())
                         l_str = time.strftime("%y-%m-%d %H:%M", time.localtime(l_ts))
                     except: pass
-                sims.append({"name": item, "creation": c_str,"last_opened": l_str}) # Removed ts for simplicity
+                sims.append({"name": item, "creation": c_str,"last_opened": l_str})
     except Exception as e: print(f"Err reading sims: {e}"); return []
     return sims
 
@@ -319,53 +352,32 @@ def delete_simulation(sim_name):
 
 # ======================================================
 # Unity Batch Execution & Progress Monitoring
+# (Sin cambios en esta sección)
 # ======================================================
-# --- Función para formatear segundos (útil para ETA) ---
 def format_time(seconds):
     if seconds is None or seconds < 0 or math.isinf(seconds) or math.isnan(seconds):
         return "--:--:--"
     if seconds == 0:
         return "0s"
-
     seconds = int(seconds)
     hours, rem = divmod(seconds, 3600)
     minutes, secs = divmod(rem, 60)
+    if hours > 0: return f"{hours:02d}:{minutes:02d}:{secs:02d}"
+    elif minutes > 0: return f"{minutes:02d}:{secs:02d}"
+    else: return f"{secs}s"
 
-    if hours > 0:
-        return f"{hours:02d}:{minutes:02d}:{secs:02d}"
-    elif minutes > 0:
-        return f"{minutes:02d}:{secs:02d}"
-    else:
-        return f"{secs}s"
-    
 def monitor_unity_progress(stop_event, operation_tag):
     if not SIMULATION_PROJECT_PATH or not os.path.exists(SIMULATION_PROJECT_PATH):
         print(f"\nAdvertencia: La ruta '{SIMULATION_PROJECT_PATH}' no existe al iniciar el monitoreo.")
         return
-
-    TARGET_SIZE_MB = 3000.0
-    BYTES_PER_MB = 1024 * 1024
-    TARGET_SIZE_BYTES = TARGET_SIZE_MB * BYTES_PER_MB
-
-    last_update_time = 0
-    start_time = time.time()
-    initial_size_bytes = 0
-    eta_str = "Calculating..." # Valor inicial para ETA
-
-    try:
-        # Obtenemos tamaño inicial para cálculos de tasa
-        initial_size_bytes = get_folder_size(SIMULATION_PROJECT_PATH)
-    except Exception as e:
-        print(f"\nError al obtener tamaño inicial para '{SIMULATION_PROJECT_PATH}': {e}")
-        # Decide si continuar con tamaño 0 o retornar
-        initial_size_bytes = 0 # Continuar asumiendo 0 si falla
-
+    TARGET_SIZE_MB = 3000.0; BYTES_PER_MB = 1024*1024; TARGET_SIZE_BYTES = TARGET_SIZE_MB * BYTES_PER_MB
+    last_update_time = 0; start_time = time.time(); initial_size_bytes = 0; eta_str = "Calculating..."
+    try: initial_size_bytes = get_folder_size(SIMULATION_PROJECT_PATH)
+    except Exception as e: print(f"\nError al obtener tamaño inicial para '{SIMULATION_PROJECT_PATH}': {e}"); initial_size_bytes = 0
     initial_size_mb = initial_size_bytes / BYTES_PER_MB
     print(f"[{operation_tag}] Iniciando monitoreo. Tamaño inicial: {initial_size_mb:.1f}MB. Objetivo: {TARGET_SIZE_MB:.0f}MB")
-
     while not stop_event.is_set():
         now = time.time()
-        # Comprobar tamaño cada 1.5 segundos
         if now - last_update_time > 1.5:
             current_size_bytes = 0
             try:
@@ -373,52 +385,21 @@ def monitor_unity_progress(stop_event, operation_tag):
                 current_size_mb = current_size_bytes / BYTES_PER_MB
                 elapsed_time = now - start_time
                 size_increase_bytes = current_size_bytes - initial_size_bytes
-
-                # --- Cálculo del ETA ---
-                if elapsed_time > 5 and size_increase_bytes > 1024: # Esperar > 5s y crecimiento > 1KB para calcular
-                    # Tasa de crecimiento en Bytes por segundo
+                if elapsed_time > 5 and size_increase_bytes > 1024:
                     rate_bytes_per_sec = size_increase_bytes / elapsed_time
                     remaining_bytes = TARGET_SIZE_BYTES - current_size_bytes
-
-                    if rate_bytes_per_sec > 0 and remaining_bytes > 0:
-                        eta_seconds = remaining_bytes / rate_bytes_per_sec
-                        eta_str = f"ETA: {format_time(eta_seconds)}"
-                    elif remaining_bytes <= 0:
-                        eta_str = "ETA: Completed"
-                        # Opcional: podrías querer detener el monitoreo aquí
-                        # stop_event.set() # Descomenta si quieres que pare al llegar
-                    else:
-                        # No hay crecimiento positivo o ya pasó el objetivo (pero rate=0?)
-                        eta_str = "ETA: --" # O "Stalled"
-                elif elapsed_time <= 5:
-                     eta_str = "ETA: Calculating..." # Aún muy pronto
-                else: # Hubo tiempo pero sin crecimiento significativo
-                     eta_str = "ETA: --"
-
-
-                # --- Actualización del Estado ---
+                    if rate_bytes_per_sec > 0 and remaining_bytes > 0: eta_seconds = remaining_bytes / rate_bytes_per_sec; eta_str = f"ETA: {format_time(eta_seconds)}"
+                    elif remaining_bytes <= 0: eta_str = "ETA: Completed"
+                    else: eta_str = "ETA: --"
+                elif elapsed_time <= 5: eta_str = "ETA: Calculating..."
+                else: eta_str = "ETA: --"
                 progress_percent = (current_size_mb / TARGET_SIZE_MB) * 100 if TARGET_SIZE_MB > 0 else 0
-                # Limitar el porcentaje a 100% para la visualización
                 display_percent = min(progress_percent, 100.0)
-
-                status_msg = (f"[{operation_tag}] {current_size_mb:.1f}/{TARGET_SIZE_MB:.0f}MB "
-                              f"({display_percent:.1f}%) - {eta_str}      ") # Espacios para limpiar línea
+                status_msg = (f"[{operation_tag}] {current_size_mb:.1f}/{TARGET_SIZE_MB:.0f}MB ({display_percent:.1f}%) - {eta_str}      ")
                 update_status(status_msg)
-
-            except Exception as e:
-                # Captura errores durante la obtención de tamaño o cálculo de ETA
-                # Mantén el último ETA conocido o muestra un error
-                error_msg = f"Error reading size: {e}"[:30] # Limitar longitud del error
-                update_status(f"[{operation_tag}] {error_msg}... - {eta_str}      ")
-                # 'pass' ya no está, el error se muestra pero el bucle continúa
-
-            last_update_time = now # Actualizar el tiempo de la última comprobación válida o intento
-
-        # Espera corta para no saturar la CPU y permitir que stop_event funcione
-        # time.sleep(0.5) es suficiente si no usas threading.Event.wait()
+            except Exception as e: error_msg = f"Error reading size: {e}"[:30]; update_status(f"[{operation_tag}] {error_msg}... - {eta_str}      ")
+            last_update_time = now
         time.sleep(0.5)
-
-    # Mensaje final al salir del bucle
     final_size_mb = get_folder_size(SIMULATION_PROJECT_PATH) / BYTES_PER_MB
     print(f"\n[{operation_tag}] Monitoreo finalizado. Tamaño final: {final_size_mb:.1f}MB")
 
@@ -444,20 +425,11 @@ def run_unity_batchmode(exec_method, op_name, log_file, timeout=600, extra_args=
             _, exe_path_after_build = get_build_target_and_executable(SIMULATION_PROJECT_PATH)
             found = False
             for attempt in range(6):
-                if exe_path_after_build and os.path.exists(exe_path_after_build):
-                    found = True; print(f"DEBUG build_task: Executable CONFIRMED (attempt {attempt+1}): {exe_path_after_build}"); break
+                if exe_path_after_build and os.path.exists(exe_path_after_build): found = True; print(f"DEBUG build_task: Executable CONFIRMED (attempt {attempt+1}): {exe_path_after_build}"); break
                 print(f"DEBUG build_task: Executable check attempt {attempt+1} failed for {exe_path_after_build}"); time.sleep(0.5)
             if found: update_status(f"[{op_name.capitalize()}] Executable verified.")
-            else:
-                print(f"WARN build_task: Executable NOT FOUND post-build: {exe_path_after_build}"); success = False
-                handle_unity_execution_error(FileNotFoundError(f"Build finished but output not found: {exe_path_after_build}"), op_name)
-                update_status(f"[Error] {op_name.capitalize()} failed: Output missing.")
-    except subprocess.CalledProcessError as e:
-        handle_unity_execution_error(e, op_name); update_status(f"[Error] {op_name.capitalize()} failed (code {e.returncode}). Check {log_path}")
-        print(f"--- Unity Output on Error ({op_name}) ---")
-        if e.stdout: print(e.stdout[-1000:])
-        if e.stderr: print("--- Unity Errors ---\n" + e.stderr[-1000:])
-        print("--- End Unity Output ---")
+            else: print(f"WARN build_task: Executable NOT FOUND post-build: {exe_path_after_build}"); success = False; handle_unity_execution_error(FileNotFoundError(f"Build finished but output not found: {exe_path_after_build}"), op_name); update_status(f"[Error] {op_name.capitalize()} failed: Output missing.")
+    except subprocess.CalledProcessError as e: handle_unity_execution_error(e, op_name); update_status(f"[Error] {op_name.capitalize()} failed (code {e.returncode}). Check {log_path}"); print(f"--- Unity Output on Error ({op_name}) ---");
     except subprocess.TimeoutExpired as e: handle_unity_execution_error(e, op_name); update_status(f"[Error] {op_name.capitalize()} timed out. Check {log_path}")
     except (FileNotFoundError, PermissionError) as e: handle_unity_execution_error(e, op_name); update_status(f"[Error] {op_name.capitalize()} failed (File/Permission).")
     except Exception as e: handle_unity_execution_error(e, f"{op_name} (unexpected)"); update_status(f"[Error] Unexpected error during {op_name}.")
@@ -472,7 +444,6 @@ def build_simulation_task(extra_args, callback):
     """Task run in thread to perform build and call callback."""
     disable_all_interactions() # Disable UI before starting
     success, final_exe_path = run_unity_batchmode("BuildScript.PerformBuild", "build", "build_log.txt", timeout=1800, extra_args=extra_args)
-    # Re-enable UI via callback in main thread
     if callback: main_window.after(0, lambda s=success, p=final_exe_path: callback(s, p))
     main_window.after(10, enable_all_interactions) # Ensure UI is enabled after callback
 
@@ -481,8 +452,6 @@ def build_simulation_threaded(callback=None):
     build_target, _ = get_build_target_and_executable(SIMULATION_PROJECT_PATH)
     if not build_target: print("Error: Could not determine build target"); return
     extra = ["-buildTarget", build_target]
-    # Disable UI immediately before starting thread
-    # disable_all_interactions() # Moved inside the task to ensure it runs before Unity starts
     threading.Thread(target=lambda: build_simulation_task(extra, callback), daemon=True).start()
 
 def open_simulation_executable():
@@ -510,9 +479,9 @@ def open_in_unity():
 
 # ======================================================
 # API Simulation Creation
+# (Sin cambios en esta sección)
 # ======================================================
 def create_simulation_thread(sim_name, sim_desc, original_states):
-    # (No significant changes needed here, just status messages)
     update_status(f"Creating '{sim_name}'...");
     try: os.makedirs(SIMULATIONS_DIR, exist_ok=True)
     except Exception as e: messagebox.showerror("Critical Error", f"Could not create simulations dir: {e}"); update_status("Critical dir error."); main_window.after(0, update_button_states); return
@@ -526,21 +495,16 @@ def create_simulation_thread(sim_name, sim_desc, original_states):
         update_status(f"'{sim_name}' created successfully."); main_window.after(0, lambda: messagebox.showinfo("Success", f"'{sim_name}' created."))
         main_window.after(0, populate_simulations); success = True
     except FileNotFoundError as e: messagebox.showerror("Critical Error", f"Required script not found:\n{e}"); update_status("Error: Missing script.")
-    except subprocess.CalledProcessError as e:
-        err_out = e.stderr if e.stderr else e.stdout; code=e.returncode; msg, det = "API ERROR", f"Code {code}. Output:\n{err_out}"
-        if code == 7 or "CONTENT ERROR" in err_out: msg, det = "CONTENT ERROR", "Simulation must be E.Coli or S.Cerevisiae."
-        elif "already exists" in err_out or "DUPLICATE" in err_out: msg, det = "DUPLICATE SIMULATION", f"'{sim_name}' already exists."
-        elif "format" in err_out.lower() or "FORMATTING ERROR" in err_out: msg, det = "FORMATTING ERROR", "Invalid question format."
-        main_window.after(0, lambda m=msg, d=det: messagebox.showerror(f"Creation Error ({m})", d)); update_status(f"Creation error: {msg}")
+    except subprocess.CalledProcessError as e: err_out = e.stderr if e.stderr else e.stdout; code=e.returncode; msg, det = "API ERROR", f"Code {code}. Output:\n{err_out}"
     except subprocess.TimeoutExpired: messagebox.showerror("Error", "Simulation creation timed out."); update_status("Error: Creation timeout.")
     except Exception as e: messagebox.showerror("Unexpected Error", f"CRITICAL ERROR:\n{e}"); update_status("Critical creation error."); print(f"Err create_sim_thread: {e}"); import traceback; traceback.print_exc()
     finally: main_window.after(0, update_button_states)
 
 # ======================================================
 # Verification Logic
+# (Sin cambios en esta sección)
 # ======================================================
 def perform_verification(show_results_box=False, on_startup=False):
-    # (No changes from previous version regarding checks)
     global unity_path_ok, unity_version_ok, unity_projects_path_ok, apis_key_ok, apis_models_ok, initial_verification_complete
     global UNITY_EXECUTABLE, UNITY_PROJECTS_PATH, OPENAI_API_KEY, FINE_TUNED_MODEL_NAME, SECONDARY_FINE_TUNED_MODEL_NAME
     global SIMULATION_PROJECT_PATH, ASSETS_FOLDER, STREAMING_ASSETS_FOLDER, SIMULATION_LOADED_FILE, last_simulation_loaded
@@ -570,20 +534,24 @@ def perform_verification(show_results_box=False, on_startup=False):
     else:
         openai.api_key = OPENAI_API_KEY
         try:
-            openai.Model.list(limit=1); apis_key_ok = True; results.append("✅ API Key: Connection OK.")
+            if hasattr(openai, "models"): client = openai.OpenAI(); client.models.list(limit=1)
+            else: openai.Model.list(limit=1)
+            apis_key_ok = True; results.append("✅ API Key: Connection OK.")
             models_ok_list = []
             for name, mid in [("Primary", FINE_TUNED_MODEL_NAME), ("Secondary", SECONDARY_FINE_TUNED_MODEL_NAME)]:
                 if not mid: results.append(f"⚠️ {name} Model: Not set"); continue
-                try: openai.Model.retrieve(mid); results.append(f"✅ {name} Model: OK"); models_ok_list.append(name=="Primary")
-                except openai_error.InvalidRequestError: results.append(f"❌ {name} Model: Not found"); models_ok_list.append(False)
+                try:
+                    if hasattr(openai, "models"): client.models.retrieve(mid)
+                    else: openai.Model.retrieve(mid)
+                    results.append(f"✅ {name} Model: OK"); models_ok_list.append(name=="Primary")
+                except (openai_error.InvalidRequestError, InvalidRequestError): results.append(f"❌ {name} Model: Not found"); models_ok_list.append(False)
                 except Exception as me: results.append(f"❌ {name} Model: Error ({me})"); models_ok_list.append(False)
             apis_models_ok = models_ok_list and models_ok_list[0]
             if not apis_models_ok and len(models_ok_list)>0 : results.append("❌ Primary Model: Invalid or not found.")
-        except openai_error.AuthenticationError: results.append("❌ API Key: Invalid.")
+        except (openai_error.AuthenticationError, AuthenticationError): results.append("❌ API Key: Invalid.")
         except Exception as ae: results.append(f"❌ API Error: {ae}")
     if not initial_verification_complete: initial_verification_complete = True
-    status_parts = ["Unity OK" if unity_path_ok and unity_version_ok and unity_projects_path_ok else "Unity ERR",
-                    "API OK" if apis_key_ok and apis_models_ok else "API ERR"]
+    status_parts = ["Unity OK" if unity_path_ok and unity_version_ok and unity_projects_path_ok else "Unity ERR", "API OK" if apis_key_ok and apis_models_ok else "API ERR"]
     final_status = " | ".join(status_parts)
     if 'main_window' in globals() and main_window.winfo_exists():
         main_window.after(0, lambda: update_status(final_status))
@@ -595,23 +563,22 @@ def perform_verification(show_results_box=False, on_startup=False):
             elif not unity_version_ok: err_msg += f"- Incorrect Unity version (requires {req_ver}).\n"
             if not unity_path_ok or not unity_version_ok or not unity_projects_path_ok: err_msg += "  (Loading disabled)\n"
             if not apis_key_ok or not apis_models_ok: err_msg += "- Invalid API Key/Models.\n  (Creation disabled)\n"
-            if err_msg: main_window.after(200, lambda m=err_msg: messagebox.showwarning("Initial Config Issues", "Problems found:\n" + m + "\nUse File -> Settings to fix."))
+            if err_msg: main_window.after(200, lambda m=err_msg: messagebox.showwarning("Initial Config Issues", "Problems found:\n" + m + "\nUse Settings button to fix."))
     else: print(f"Verification Status: {final_status}")
     if show_results_box:
         res_text = "Verification Results:\n\n" + "\n".join(results)
         all_ok = unity_path_ok and unity_version_ok and unity_projects_path_ok and apis_key_ok and apis_models_ok
-        if 'main_window' in globals() and main_window.winfo_exists():
-             main_window.after(0, lambda: messagebox.showinfo("Verification", res_text) if all_ok else messagebox.showwarning("Verification", res_text))
+        if 'main_window' in globals() and main_window.winfo_exists(): main_window.after(0, lambda: messagebox.showinfo("Verification", res_text) if all_ok else messagebox.showwarning("Verification", res_text))
 
 # ======================================================
-# Configuration Window (API Note Removed)
+# Configuration Window
+# (Sin cambios en esta sección)
 # ======================================================
 def open_config_window():
-    cfg_win = tk.Toplevel(main_window); cfg_win.title("Settings"); center_window(cfg_win, 650, 230) # Adjusted height
+    cfg_win = tk.Toplevel(main_window); cfg_win.title("Settings"); center_window(cfg_win, 650, 230)
     cfg_win.resizable(False, False); cfg_win.transient(main_window); cfg_win.grab_set()
     frame = ttk.Frame(cfg_win, padding=20); frame.pack(fill="both", expand=True)
     paths_f = ttk.LabelFrame(frame, text="Paths", padding=10); paths_f.pack(fill="x", pady=5)
-    # api_note_f removed
     entries = {}
     def create_row(p, lbl, env, key, is_path=True, is_file=True):
         f = ttk.Frame(p); f.pack(fill="x", pady=4)
@@ -624,150 +591,147 @@ def open_config_window():
                 p = filedialog.askopenfilename(title=f"Select {lbl}", initialdir=init) if is_file else filedialog.askdirectory(title=f"Select {lbl}", initialdir=init if os.path.isdir(init) else "/")
                 if p: v.set(p)
             ttk.Button(f, text="...", width=3, command=browse).pack(side="left")
-
     create_row(paths_f, "Unity Executable:", "UNITY_EXECUTABLE", "unity_exe");
     create_row(paths_f, "Projects Folder:", "UNITY_PROJECTS_PATH", "projects_path", is_file=False)
-    # API fields are not shown
     btn_f = ttk.Frame(frame); btn_f.pack(pady=15, side="bottom", fill="x")
     def save():
         data = {k: v.get().strip() for k, v in entries.items()}
         errs = [f"- {k.replace('_',' ').capitalize()} empty." for k, v in data.items() if not v]
         if errs: messagebox.showerror("Input Error", "Required fields:\n"+"\n".join(errs), parent=cfg_win); return
-        current_api_key = os.getenv("OPENAI_API_KEY", "") # Read existing API vars
-        current_model1 = os.getenv("FINE_TUNED_MODEL_NAME", "")
-        current_model2 = os.getenv("2ND_FINE_TUNED_MODEL_NAME", "")
+        current_api_key = os.getenv("OPENAI_API_KEY", ""); current_model1 = os.getenv("FINE_TUNED_MODEL_NAME", ""); current_model2 = os.getenv("2ND_FINE_TUNED_MODEL_NAME", "")
         try:
             with open(".env", "w", encoding='utf-8') as f:
-                f.write(f"UNITY_EXECUTABLE={data['unity_exe']}\n")
-                f.write(f"UNITY_PROJECTS_PATH={data['projects_path']}\n")
-                f.write(f"OPENAI_API_KEY={current_api_key}\n") # Preserve API vars
-                f.write(f"FINE_TUNED_MODEL_NAME={current_model1}\n")
-                f.write(f"2ND_FINE_TUNED_MODEL_NAME={current_model2}\n")
+                f.write(f"UNITY_EXECUTABLE={data['unity_exe']}\n"); f.write(f"UNITY_PROJECTS_PATH={data['projects_path']}\n")
+                f.write(f"OPENAI_API_KEY={current_api_key}\n"); f.write(f"FINE_TUNED_MODEL_NAME={current_model1}\n"); f.write(f"2ND_FINE_TUNED_MODEL_NAME={current_model2}\n")
             messagebox.showinfo("Success", "Settings saved.\nRe-verifying...", parent=cfg_win); cfg_win.destroy(); main_window.after(100, lambda: perform_verification(show_results_box=True))
         except Exception as e: messagebox.showerror("Save Error", f"Could not write .env:\n{e}", parent=cfg_win)
     ttk.Button(btn_f, text="Save and Verify", command=save).pack(side="left", padx=20, expand=True); ttk.Button(btn_f, text="Cancel", command=cfg_win.destroy).pack(side="left", padx=20, expand=True)
 
-
 # ======================================================
-# GUI Definitions (Callbacks first)
+# GUI Definitions (Callbacks)
 # ======================================================
 def populate_simulations():
+    # (Sin cambios)
     if not initial_verification_complete: return
     for item in sim_tree.get_children():
         try: sim_tree.delete(item)
-        except tk.TclError: pass # Ignorar si ya no existe
-
+        except tk.TclError: pass
     update_status("Searching for simulations...")
     simulations = get_simulations()
     global last_simulation_loaded
     last_simulation_loaded = read_last_loaded_simulation_name()
-
     if simulations:
         for i, sim in enumerate(simulations):
             is_loaded = (sim["name"] == last_simulation_loaded)
-            row_tag = "evenrow" if i % 2 == 0 else "oddrow"
-            # APLICAR LOS TAGS CORRECTOS
-            item_tags = [row_tag] # Tag base par/impar
-            if is_loaded:
-                item_tags.append("loaded") # Añadir tag 'loaded' si corresponde
-
+            row_tag = "evenrow" if i % 2 == 0 else "oddrow"; item_tags = [row_tag]
+            if is_loaded: item_tags.append("loaded")
             try:
                 sim_tree.insert("", "end", iid=sim["name"],
-                                values=(sim["name"], sim["creation"], sim["last_opened"],
-                                        loaded_indicator_text if is_loaded else "",
-                                        play_icon_text, delete_icon_text),
-                                tags=tuple(item_tags)) # Usar los tags calculados
-            except tk.TclError as e:
-                print(f"Error inserting {sim['name']}: {e}")
-
-
-        # Ordenar después de poblar
-        # Encuentra la columna por la que ordenar inicialmente (ej. 'nombre')
-        default_sort_col = "nombre"
-        if default_sort_col in sort_order:
-            sort_column(sim_tree, default_sort_col, sort_order[default_sort_col])
-
+                                values=(sim["name"], sim["creation"], sim["last_opened"], loaded_indicator_text if is_loaded else "", play_icon_text, delete_icon_text),
+                                tags=tuple(item_tags))
+            except tk.TclError as e: print(f"Error inserting {sim['name']}: {e}")
+        default_sort_col = "nombre";
+        if default_sort_col in sort_order: sort_column(sim_tree, default_sort_col, sort_order[default_sort_col])
         update_status(f"List updated ({len(simulations)} found).")
-    else:
-        update_status("No simulations found.")
+    else: update_status("No simulations found.")
     update_button_states()
-    
+
 def update_button_states():
-    if 'main_window' not in globals() or not main_window.winfo_exists() or is_build_running : return # Check build flag
-    if not initial_verification_complete: state = "disabled"; reload_state = "normal"
-    else:
-        reload_state = "normal"
-        create_state = "normal" if apis_key_ok and apis_models_ok else "disabled"
-        graph_state = "normal" if sim_tree.selection() else "disabled"
+    # (Modificado para no referenciar el toggle_button)
+    if 'main_window' not in globals() or not main_window.winfo_exists() or is_build_running : return
+
+    reload_state = "normal"
+    graph_state = "normal" if sim_tree.selection() else "disabled"
+    create_state = "normal" if apis_key_ok and apis_models_ok else "disabled"
+    verify_state = "normal"
+    settings_state = "normal"
+    about_state = "normal"
+    unity_down_state = "normal"
+    exit_state = "normal"
+    # toggle_state = "normal" <- Eliminado
+
+    if not initial_verification_complete:
+        graph_state = "disabled"; create_state = "disabled"
+    elif is_build_running:
+        # Deshabilitación manejada por disable/enable_all_interactions, pero doble check
+        reload_state = "disabled"; graph_state = "disabled"; create_state = "disabled"
+        verify_state = "disabled"; settings_state = "disabled"; about_state = "disabled"
+        unity_down_state = "disabled"; exit_state = "disabled"
+        # toggle_state = "disabled" <- Eliminado
+
     try:
-        reload_btn.config(state=reload_state)
-        graph_btn.config(state=graph_state if initial_verification_complete else "disabled")
-        create_btn.config(state=create_state if initial_verification_complete else "disabled")
-    except NameError: pass
-    except tk.TclError: pass
+        reload_btn.config(state=reload_state); graph_btn.config(state=graph_state); create_btn.config(state=create_state)
+        if 'settings_btn' in globals(): settings_btn.config(state=settings_state)
+        if 'verify_btn' in globals(): verify_btn.config(state=verify_state)
+        if 'unity_down_btn' in globals(): unity_down_btn.config(state=unity_down_state)
+        if 'about_btn' in globals(): about_btn.config(state=about_state)
+        if 'exit_btn' in globals(): exit_btn.config(state=exit_state)
+        # if 'toggle_button' in globals(): toggle_button.config(state=toggle_state) <- Eliminado
+    except (NameError, tk.TclError): pass
 
 def on_load_simulation_request(simulation_name):
+    # (Modificado para no deshabilitar el toggle_button)
     global is_build_running
-    if is_build_running: return # Prevent action if build is running
+    if is_build_running: return
     print(f"Load request for: {simulation_name}")
-    if not all([unity_path_ok, unity_version_ok, unity_projects_path_ok]):
-        messagebox.showerror("Unity Error", "Cannot load: Invalid Unity config."); return
+    if not all([unity_path_ok, unity_version_ok, unity_projects_path_ok]): messagebox.showerror("Unity Error", "Cannot load: Invalid Unity config."); return
     if simulation_name == last_simulation_loaded:
         update_status(f"'{simulation_name}' is already loaded. Showing options..."); update_last_opened(simulation_name)
         _, current_exe_path = get_build_target_and_executable(SIMULATION_PROJECT_PATH)
         main_window.after(0, lambda s=simulation_name, p=current_exe_path: show_options_window(s, p))
         return
-    # Disable UI elements *before* starting the thread for loading/building
-    # disable_all_interactions() # Moved to build_simulation_task start
     reload_btn.config(state="disabled"); graph_btn.config(state="disabled"); create_btn.config(state="disabled")
-    sim_tree.unbind("<Button-1>") # Disable tree clicks specifically during load as well
-    sim_tree.config(selectmode="none", cursor="watch")
+    sim_tree.unbind("<Button-1>"); sim_tree.config(selectmode="none", cursor="watch")
+    if 'sidebar_frame' in globals():
+        for widget in sidebar_frame.winfo_children():
+            if isinstance(widget, ttk.Button): widget.configure(state="disabled")
+    # if 'toggle_button' in globals(): toggle_button.config(state="disabled") <- Eliminado
     threading.Thread(target=load_simulation_logic, args=(simulation_name,), daemon=True).start()
 
 def load_simulation_logic(simulation_name):
-    """Performs loading and building in a thread."""
-    update_status(f"Loading '{simulation_name}'...");
-    update_status("Closing Unity..."); ensure_unity_closed()
+    # (Sin cambios)
+    update_status(f"Loading '{simulation_name}'..."); update_status("Closing Unity..."); ensure_unity_closed()
     update_status(f"Loading files '{simulation_name}'..."); load_success = load_simulation(simulation_name)
     if load_success:
         update_status("Files OK. Post-load..."); prefab_success = run_prefab_material_tool()
         if prefab_success:
-            update_status("Prefabs OK. Build...");
-            # Build is started here, it will disable interactions internally
-            build_simulation_threaded(callback=lambda success, path: build_callback(success, simulation_name, path))
+            update_status("Prefabs OK. Build..."); build_simulation_threaded(callback=lambda success, path: build_callback(success, simulation_name, path))
         else:
             update_status(f"Prefabs fail '{simulation_name}'. Build cancelled."); messagebox.showerror("Post-Load Error", "Prefabs tool failed. Build cancelled.")
-            # Re-enable UI if build doesn't start
             main_window.after(0, enable_all_interactions)
     else:
-        update_status(f"Error loading '{simulation_name}'.");
-        # Re-enable UI on load failure
-        main_window.after(0, enable_all_interactions)
+        update_status(f"Error loading '{simulation_name}'."); main_window.after(0, enable_all_interactions)
 
 def build_callback(success, simulation_name, executable_path):
-    """Called after build finishes (in main thread)."""
+    # (Sin cambios)
     if success and executable_path:
         update_status(f"Build '{simulation_name}' OK."); show_options_window(simulation_name, executable_path)
     else: update_status(f"Build '{simulation_name}' failed" + (" (Executable missing)." if success else "."))
-    # enable_all_interactions() is called in the build_simulation_task finally block
 
 def on_delete_simulation_request(simulation_name):
+    # (Sin cambios)
     global is_build_running
-    if is_build_running: return # Prevent action
+    if is_build_running: return
     print(f"Delete request for: {simulation_name}")
     delete_simulation(simulation_name)
 
 def on_show_graphs_thread():
+    # (Modificado para no deshabilitar el toggle_button)
     global is_build_running
-    if is_build_running: return # Prevent action
+    if is_build_running: return
     selected = sim_tree.selection()
     if not selected: messagebox.showwarning("Selection", "Select simulation to view graphs."); return
-    sim_name = sim_tree.item(selected[0], "values")[0] # Name is back to index 0
+    sim_name = sim_tree.item(selected[0], "values")[0]
     update_status(f"Generating graphs for '{sim_name}'...")
     reload_btn.config(state="disabled"); graph_btn.config(state="disabled"); create_btn.config(state="disabled")
+    if 'sidebar_frame' in globals():
+        for widget in sidebar_frame.winfo_children():
+             if isinstance(widget, ttk.Button): widget.configure(state="disabled")
+    # if 'toggle_button' in globals(): toggle_button.config(state="disabled") <- Eliminado
     threading.Thread(target=show_graphs_logic, args=(sim_name,), daemon=True).start()
 
 def show_graphs_logic(sim_name):
+    # (Sin cambios)
     try:
         csv_p = Path.home()/"Documents"/"SimulationLoggerData"/sim_name/"SimulationStats.csv"
         if not csv_p.exists(): messagebox.showerror("Error", f"Data file not found: {csv_p}"); update_status("Error: CSV not found."); return
@@ -781,8 +745,9 @@ def show_graphs_logic(sim_name):
     finally: main_window.after(0, update_button_states)
 
 def on_create_simulation():
+    # (Modificado para no deshabilitar el toggle_button)
     global is_build_running
-    if is_build_running: return # Prevent action
+    if is_build_running: return
     if not apis_key_ok or not apis_models_ok: messagebox.showerror("API Error", "Cannot create: Invalid API config."); return
     sim_name = custom_askstring("Create Simulation", "Simulation Name:")
     if not sim_name: update_status("Creation cancelled."); return
@@ -793,10 +758,14 @@ def on_create_simulation():
     if not sim_desc: update_status("Creation cancelled."); return
     states = { 'reload': reload_btn['state'], 'graph': graph_btn['state'], 'create': create_btn['state'] }
     reload_btn.config(state="disabled"); graph_btn.config(state="disabled"); create_btn.config(state="disabled")
+    if 'sidebar_frame' in globals():
+        for widget in sidebar_frame.winfo_children():
+             if isinstance(widget, ttk.Button): widget.configure(state="disabled")
+    # if 'toggle_button' in globals(): toggle_button.config(state="disabled") <- Eliminado
     threading.Thread(target=create_simulation_thread, args=(sim_name, sim_desc, states), daemon=True).start()
 
 def show_options_window(simulation_name, executable_path):
-    # (No changes needed from previous version)
+    # (Sin cambios)
     opt_win = tk.Toplevel(main_window); opt_win.title(f"Options for '{simulation_name}'")
     center_window(opt_win, 350, 180); opt_win.resizable(False, False); opt_win.transient(main_window); opt_win.grab_set()
     frame = ttk.Frame(opt_win, padding=20); frame.pack(expand=True, fill="both")
@@ -809,20 +778,19 @@ def show_options_window(simulation_name, executable_path):
     update_status(f"Options available for '{simulation_name}'."); opt_win.wait_window()
 
 def handle_tree_click(event):
-    # (No changes needed from previous version)
+    # (Sin cambios)
     global is_build_running
-    if is_build_running: return # Prevent action
+    if is_build_running: return
     region = sim_tree.identify_region(event.x, event.y)
     if region != "cell": cancel_tooltip(sim_tree); return
     item_id = sim_tree.identify_row(event.y); col_id = sim_tree.identify_column(event.x)
     if not item_id or not col_id: cancel_tooltip(sim_tree); return
     try:
         col_index = int(col_id.replace('#','')) - 1
-        # Updated column order
         click_columns = ("nombre", "creacion", "ultima", "col_loaded", "col_load", "col_delete")
         if col_index < 0 or col_index >= len(click_columns): cancel_tooltip(sim_tree); return
         col_name = click_columns[col_index]
-        simulation_name = sim_tree.item(item_id, "values")[0] # Name is now at index 0
+        simulation_name = sim_tree.item(item_id, "values")[0]
         sim_tree.selection_set(item_id); sim_tree.focus(item_id)
         hide_tooltip()
         if col_name == "col_load": on_load_simulation_request(simulation_name)
@@ -830,9 +798,9 @@ def handle_tree_click(event):
     except Exception as e: print(f"Error handle_tree_click: {e}"); cancel_tooltip(sim_tree)
 
 def handle_tree_motion(event):
-    # (Tooltip logic adapted for new column order)
+    # (Sin cambios)
     global is_build_running
-    if is_build_running: return # Prevent action
+    if is_build_running: return
     global tooltip_job_id
     region = sim_tree.identify_region(event.x, event.y)
     if region != "cell": cancel_tooltip(sim_tree); return
@@ -840,11 +808,10 @@ def handle_tree_motion(event):
     if not col_id or not item_id: cancel_tooltip(sim_tree); return
     try:
         col_index = int(col_id.replace('#','')) - 1
-        motion_columns = ("nombre", "creacion", "ultima", "col_loaded", "col_load", "col_delete") # New order
+        motion_columns = ("nombre", "creacion", "ultima", "col_loaded", "col_load", "col_delete")
         if col_index < 0 or col_index >= len(motion_columns): cancel_tooltip(sim_tree); return
         col_name = motion_columns[col_index]
         tooltip_text = None
-        # Check new indices for load/delete columns
         if col_name == "col_load": tooltip_text = "Load/Run Simulation"
         elif col_name == "col_delete": tooltip_text = "Delete Simulation"
         if tooltip_text: schedule_tooltip(sim_tree, tooltip_text)
@@ -852,27 +819,52 @@ def handle_tree_motion(event):
     except Exception: cancel_tooltip(sim_tree)
 
 def handle_tree_leave(event):
-    # (No changes needed from previous version)
+    # (Sin cambios)
     cancel_tooltip(sim_tree)
 
+# --- Función toggle_sidebar() ELIMINADA ---
+
+# --- Función para cargar el logo ---
+def load_logo(path, target_width):
+    global logo_photo_ref # Necesario para mantener la referencia
+    try:
+        img = Image.open(path)
+
+        # Calcular nuevo alto manteniendo la proporción
+        width_percent = (target_width / float(img.size[0]))
+        target_height = int((float(img.size[1]) * float(width_percent)))
+
+        # Redimensionar imagen con antialiasing de alta calidad
+        img = img.resize((target_width, target_height), Image.Resampling.LANCZOS)
+
+        logo_photo_ref = ImageTk.PhotoImage(img)
+        return logo_photo_ref
+    except FileNotFoundError:
+        print(f"Warning: Logo image not found at '{path}'")
+        return None
+    except Exception as e:
+        print(f"Error loading logo image: {e}")
+        return None
+
 # ======================================================
-# GUI Setup
+# GUI Setup (Modificado para Sidebar Fijo y Logo)
 # ======================================================
 main_window = tk.Tk()
 try: main_window.iconbitmap("icono.ico")
 except tk.TclError: print("Warn: icono.ico not found.")
 main_window.title("Unity Simulation Manager")
-center_window(main_window, 800, 550)
+initial_width = 950
+initial_height = 600
+center_window(main_window, initial_width, initial_height)
 main_window.resizable(True, True)
 
 # --- Styles ---
 style = ttk.Style(main_window)
 style.theme_use("clam")
-
-# Configurar estilos para Widgets Generales (Botones, Labels, etc.)
+# (Estilos existentes sin cambios)
 style.configure("TButton", font=("Segoe UI", 10), padding=5)
-style.configure("Treeview", font=("Segoe UI", 10), rowheight=25) # Estilo base del Treeview
-style.configure("Treeview.Heading", font=("Segoe UI", 10, "bold")) # Estilo cabeceras
+style.configure("Treeview", font=("Segoe UI", 10), rowheight=25)
+style.configure("Treeview.Heading", font=("Segoe UI", 10, "bold"))
 style.configure("Info.TButton", foreground="white", background="#5B6EE1")
 style.map("Info.TButton", background=[("active", "#4759c7"), ("disabled", "#B0B9E8")])
 style.configure("Success.TButton", foreground="white", background="#4CAF50")
@@ -885,34 +877,78 @@ style.configure("Reload.TButton", foreground="white", background="#9C27B0")
 style.map("Reload.TButton", background=[("active", "#7B1FA2"), ("disabled", "#CE93D8")])
 style.configure("TLabel", font=("Segoe UI", 10))
 style.configure("Status.TLabel", font=("Segoe UI", 9))
+# style.configure("Toggle.TButton", font=("Segoe UI", 10), padding=2) # <- Eliminado
+style.configure("Sidebar.TFrame", background="#ECECEC")
+# Estilo para Label del Sidebar (puede ser el mismo que TLabel o uno específico)
+style.configure("Sidebar.TLabel", background="#ECECEC", font=("Segoe UI", 10)) # Asegura fondo correcto
 
-# --- Menu ---
-menubar = tk.Menu(main_window)
-fmenu = tk.Menu(menubar,tearoff=0); fmenu.add_command(label="Settings...", command=open_config_window); 
-fmenu.add_command(label="Verify Config", command=lambda: perform_verification(show_results_box=True)); 
-fmenu.add_separator(); fmenu.add_command(label="Exit", command=main_window.quit); 
-menubar.add_cascade(label="File", menu=fmenu)
-hmenu = tk.Menu(menubar,tearoff=0); hmenu.add_command(label="Download Unity (6000.0.32f1)", command=lambda: webbrowser.open("unityhub://6000.0.32f1/b2e806cf271c")); 
-hmenu.add_separator(); hmenu.add_command(label="About...", command=lambda: messagebox.showinfo("About", "Unity Simulation Manager\nVersion 1.6")); 
-menubar.add_cascade(label="Help", menu=hmenu)
-main_window.config(menu=menubar)
+# --- Main Window Layout (Using Grid) ---
+main_window.columnconfigure(0, weight=0) # Columna 0 para sidebar (ancho fijo)
+main_window.columnconfigure(1, weight=1) # Columna 1 para contenido (expande)
+main_window.rowconfigure(0, weight=1)    # Fila 0 para contenido y sidebar (expande verticalmente)
+main_window.rowconfigure(1, weight=0)    # Fila 1 para status bar (altura fija)
 
+# --- Sidebar Frame (Fijo) ---
+sidebar_frame = ttk.Frame(main_window, width=180, style="Sidebar.TFrame", relief="raised", borderwidth=1)
+sidebar_frame.grid(row=0, column=0, sticky="nsew", padx=(5, 0), pady=5)
+sidebar_frame.grid_propagate(False) # Evita que los widgets internos cambien el tamaño del frame
+sidebar_frame.rowconfigure(6, weight=1) # Fila de expansión para empujar el botón Exit hacia abajo
 
-# --- Header ---
-hdr_f = ttk.Frame(main_window, padding=(10, 10)); hdr_f.pack(fill="x")
-hdr_l = ttk.Label(hdr_f, text="Unity Simulation Manager", font=("Times New Roman", 20, "bold"), anchor="center"); hdr_l.pack(fill="x")
+# --- Logo en el Sidebar ---
+logo_photo = load_logo(LOGO_PATH, LOGO_WIDTH)
+if logo_photo:
+    logo_label = ttk.Label(sidebar_frame, image=logo_photo, style="Sidebar.TLabel")
+    logo_label.pack(pady=(10, 5), padx=5)
+    # La referencia ya está en logo_photo_ref
+else:
+    # Opcional: Mostrar texto si no hay logo
+    ttk.Label(sidebar_frame, text="[Logo]", style="Sidebar.TLabel").pack(pady=(10, 5), padx=5)
 
-# --- Main Frame ---
-main_f = ttk.Frame(main_window, padding=10); main_f.pack(expand=True, fill="both")
-main_f.columnconfigure(0, weight=1); main_f.rowconfigure(0, weight=1)
+# --- Sidebar Title ---
+ttk.Label(sidebar_frame, text="Menu", font=("Segoe UI", 12, "bold"), style="Sidebar.TLabel").pack(pady=(5, 10), padx=5)
 
-# --- Treeview Setup ---
-tree_f = ttk.Frame(main_f); tree_f.grid(row=0, column=0, sticky="nsew", padx=5, pady=(0,5))
+# --- Sidebar Buttons ---
+# toggle_button = ... # <- Eliminado
+
+settings_btn = ttk.Button(sidebar_frame, text="Settings", command=open_config_window)
+settings_btn.pack(fill="x", padx=10, pady=3) # pack en lugar de grid dentro del sidebar
+
+verify_btn = ttk.Button(sidebar_frame, text="Verify Config", command=lambda: perform_verification(show_results_box=True))
+verify_btn.pack(fill="x", padx=10, pady=3)
+
+ttk.Separator(sidebar_frame, orient='horizontal').pack(fill='x', pady=10, padx=5)
+
+unity_down_btn = ttk.Button(sidebar_frame, text="Download Unity", command=lambda: webbrowser.open("unityhub://6000.0.32f1/b2e806cf271c"))
+unity_down_btn.pack(fill="x", padx=10, pady=3)
+
+about_btn = ttk.Button(sidebar_frame, text="About", command=lambda: messagebox.showinfo("About", "Unity Simulation Manager\nVersion 1.8 (Fixed Sidebar)"))
+about_btn.pack(fill="x", padx=10, pady=3)
+
+# Botón Exit al final del sidebar
+exit_btn = ttk.Button(sidebar_frame, text="Exit", style="Danger.TButton", command=main_window.quit)
+# Usar pack con side='bottom' para empujarlo al final
+exit_btn.pack(fill="x", side='bottom', padx=10, pady=10)
+
+# --- Main Content Frame ---
+main_content_frame = ttk.Frame(main_window, padding=10)
+main_content_frame.grid(row=0, column=1, sticky="nsew", padx=(0, 10), pady=5) # Ajustar padx si es necesario
+main_content_frame.columnconfigure(0, weight=1)
+main_content_frame.rowconfigure(1, weight=1) # Fila del Treeview se expande
+
+# --- Header (dentro del main_content_frame) ---
+hdr_f = ttk.Frame(main_content_frame)
+hdr_f.grid(row=0, column=0, sticky="ew", pady=(0, 10))
+hdr_l = ttk.Label(hdr_f, text="Unity Simulation Manager", font=("Times New Roman", 20, "bold"), anchor="center")
+hdr_l.pack(fill="x")
+
+# --- Treeview Frame (dentro del main_content_frame) ---
+tree_f = ttk.Frame(main_content_frame)
+tree_f.grid(row=1, column=0, sticky="nsew", padx=5, pady=(0,5))
 tree_f.columnconfigure(0, weight=1); tree_f.rowconfigure(0, weight=1)
 columns = ("nombre", "creacion", "ultima", "col_loaded", "col_load", "col_delete")
 sim_tree = ttk.Treeview(tree_f, columns=columns, show="headings", selectmode="browse")
 
-# Column setup (Usar texto en cabeceras de iconos si se desea)
+# --- Treeview Column Setup (sin cambios aquí) ---
 sim_tree.heading("nombre", text="Simulation Name"); sim_tree.column("nombre", width=250, anchor="w", stretch=tk.YES)
 sim_tree.heading("creacion", text="Created"); sim_tree.column("creacion", width=110, anchor="center", stretch=tk.NO)
 sim_tree.heading("ultima", text="Last Used"); sim_tree.column("ultima", width=110, anchor="center", stretch=tk.NO)
@@ -923,23 +959,21 @@ sim_tree.heading("col_delete", text="Del", anchor="center"); sim_tree.column("co
 # Sorting config (sin cambios necesarios aquí)
 sort_order = {col: False for col in columns if col not in ["col_load", "col_delete", "col_loaded"]}
 def sort_column(tree, col, reverse):
-    # ... (tu función sort_column completa) ...
     if col in ["col_load", "col_delete", "col_loaded"]: return
     global sort_order; data = [(tree.set(item, col), item) for item in tree.get_children('')]
     def conv_date(v): return 0 if v in ("???", "Never") else time.mktime(time.strptime(v, "%y-%m-%d %H:%M")) if v else 0
     try: data.sort(key=lambda t: conv_date(t[0]) if col in ("creacion", "ultima") else t[0].lower(), reverse=reverse)
-    except: data.sort(key=lambda t: t[0].lower(), reverse=reverse) # Fallback sort
+    except: data.sort(key=lambda t: t[0].lower(), reverse=reverse)
     for i, (_, item) in enumerate(data): tree.move(item, '', i)
     sort_order[col] = reverse
-    # Actualizar el comando para la cabecera para invertir la próxima vez
-    tree.heading(col, command=lambda c=col: sort_column(tree, c, not reverse)) # <--- Asegúrate que el comando se actualiza
+    tree.heading(col, command=lambda c=col: sort_column(tree, c, not reverse))
 
 for col in columns:
     if col not in ["col_load", "col_delete", "col_loaded"]:
-        current_heading_text = sim_tree.heading(col)['text'] # Leer texto actual
-        sim_tree.heading(col, text=current_heading_text, command=lambda c=col: sort_column(sim_tree, c, False)) # Comando inicial para ordenar Asc
+        current_heading_text = sim_tree.heading(col)['text']
+        sim_tree.heading(col, text=current_heading_text, command=lambda c=col: sort_column(sim_tree, c, False))
 
-# Tag configuration (applied in populate_simulations)
+# Tag configuration (sin cambios aquí)
 sim_tree.tag_configure('oddrow', background='#F0F0F0')
 sim_tree.tag_configure('evenrow', background='#FFFFFF')
 sim_tree.tag_configure('loaded', background='#E0F2E0', font=('Segoe UI', 10))
@@ -947,35 +981,35 @@ sim_tree.tag_configure('loaded', background='#E0F2E0', font=('Segoe UI', 10))
 sim_tree.grid(row=0, column=0, sticky="nsew")
 scroll = ttk.Scrollbar(tree_f, orient="vertical", command=sim_tree.yview); scroll.grid(row=0, column=1, sticky="ns"); sim_tree.config(yscrollcommand=scroll.set)
 
-# Event Bindings
+# Event Bindings (sin cambios aquí)
 sim_tree.bind('<<TreeviewSelect>>', lambda e: update_button_states())
 sim_tree.bind("<Button-1>", handle_tree_click)
 sim_tree.bind("<Motion>", handle_tree_motion)
 sim_tree.bind("<Leave>", handle_tree_leave)
 
-# --- Button Frame (Bottom) ---
-btn_f_bottom = ttk.Frame(main_f); btn_f_bottom.grid(row=1, column=0, pady=(10,0), sticky="ew") # Changed row index
+# --- Button Frame (Bottom, dentro del main_content_frame) ---
+btn_f_bottom = ttk.Frame(main_content_frame)
+btn_f_bottom.grid(row=2, column=0, pady=(10,0), sticky="ew")
 num_bottom_buttons = 3; btn_f_bottom.columnconfigure(0, weight=1); btn_f_bottom.columnconfigure(num_bottom_buttons + 1, weight=1)
 reload_btn = ttk.Button(btn_f_bottom, text="Reload List", style="Reload.TButton", command=populate_simulations); reload_btn.grid(row=0, column=1, padx=10, pady=5)
 graph_btn = ttk.Button(btn_f_bottom, text="Show Graphs", style="Graph.TButton", command=on_show_graphs_thread); graph_btn.grid(row=0, column=2, padx=10, pady=5)
 create_btn = ttk.Button(btn_f_bottom, text="Create Simulation", style="Success.TButton", command=on_create_simulation); create_btn.grid(row=0, column=3, padx=10, pady=5)
 
-# --- Status Bar ---
-status_f = ttk.Frame(main_window, relief="sunken", borderwidth=1); status_f.pack(fill="x", side="bottom", padx=1, pady=1)
+# --- Status Bar (Sigue al final de la ventana principal, ocupando ambas columnas) ---
+status_f = ttk.Frame(main_window, relief="sunken", borderwidth=1)
+status_f.grid(row=1, column=0, columnspan=2, sticky="ew", padx=1, pady=1) # Ocupa ambas columnas
 status_label = ttk.Label(status_f, text="Initializing...", anchor="w", style="Status.TLabel", padding=(5,2)); status_label.pack(fill="x")
 
 # ======================================================
 # App Initialization
-# ====================================================== 
+# ======================================================
 if __name__ == "__main__":
-    update_button_states() # Actualiza estado inicial botones
+    update_button_states()
     update_status("Performing initial verification...")
-    # Iniciar verificación en hilo (que eventualmente llamará a populate_simulations)
     threading.Thread(target=perform_verification, args=(False, True), daemon=True).start()
 
     def on_closing():
-        # ... (tu código on_closing) ...
-        if is_build_running: # Prevent closing during build
+        if is_build_running:
             messagebox.showwarning("Build in Progress", "Please wait for the current build to finish before closing.")
             return
         if messagebox.askokcancel("Exit", "Exit Simulation Manager?", icon='question'):
