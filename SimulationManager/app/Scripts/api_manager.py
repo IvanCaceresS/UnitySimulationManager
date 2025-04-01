@@ -67,7 +67,7 @@ def get_cached_response(pregunta: str) -> str:
 
 def main():
     if len(sys.argv) < 3:
-        print("Error: Faltan argumentos\nUso correcto: api_manager.py <nombre-simulación> <pregunta>", file=sys.stderr)
+        print("Error: Missing arguments\nCorrect usage: api_manager.py <simulation-name> <question>", file=sys.stderr)
         sys.exit(1)
 
     simulation_name = sys.argv[1]
@@ -75,7 +75,7 @@ def main():
     
     sim_path = os.path.join("..", "Simulations", simulation_name)
     if os.path.exists(sim_path):
-        print(f"Error: La simulación '{simulation_name}' ya existe en {sim_path}", file=sys.stderr)
+        print(f"Error: Simulation '{simulation_name}' already exists in {sim_path}", file=sys.stderr)
         sys.exit(1)
 
     print(f"\nIniciando procesamiento para: {simulation_name}")
@@ -89,9 +89,17 @@ def main():
         sys.exit(1)
         
     if formatted_pregunta.strip() == "ERROR DE CONTENIDO":
-        print("ERROR: Contenido inválido detectado", file=sys.stderr)
-        print("La pregunta debe referirse exclusivamente a E.Coli y/o S.Cerevisiae", file=sys.stderr)
+        #mismos print pero en ingles
+        print("ERROR: Invalid content detected", file=sys.stderr)
+        print("The question must refer exclusively to E.Coli and/or S.Cerevisiae", file=sys.stderr)
+        print("Please rephrase the question", file=sys.stderr)
         sys.exit(7)
+    #ERROR DE CANTIDAD EXCEDIDA
+    elif formatted_pregunta.strip() == "ERROR DE CANTIDAD EXCEDIDA":#maximo 3 organismos
+        print("ERROR: Exceeded maximum number of organisms", file=sys.stderr)
+        print("The question must refer to a maximum of 3 organisms", file=sys.stderr)
+        print("Please rephrase the question", file=sys.stderr)
+        sys.exit(8)
 
     print(f"\nPregunta validada y formateada: {formatted_pregunta}")
 
