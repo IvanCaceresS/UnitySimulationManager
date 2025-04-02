@@ -1118,7 +1118,7 @@ def show_options_window(simulation_name, executable_path):
     mode_idx = get_color_mode_index()
     run_btn = ctk.CTkButton(frame, text="Run Simulation", command=run_close, state=run_state, font=APP_FONT, height=40, fg_color=COLOR_SUCCESS_GENERAL[mode_idx], hover_color=COLOR_INFO_GENERAL[mode_idx]); run_btn.pack(pady=8, fill="x", padx=10)
     if not exec_ok: ctk.CTkLabel(frame, text="Executable not found.", text_color="gray", font=("Segoe UI", 9)).pack(pady=(0, 5))
-    open_btn = ctk.CTkButton(frame, text="Open Project in Unity Editor", command=open_unity_close, font=APP_FONT, height=40, fg_color=COLOR_INFO_GENERAL[mode_idx], hover_color=COLOR_SUCCESS_GENERAL[mode_idx]); open_btn.pack(pady=8, fill="x", padx=10)
+    open_btn = ctk.CTkButton(frame, text="Open Project in Unity Editor", command=open_unity_close, font=APP_FONT, height=40, fg_color="#1E88E5", hover_color="#42A5F5"); open_btn.pack(pady=8, fill="x", padx=10)
     update_status(f"Options available for loaded sim '{simulation_name}'."); opt_win.wait_window()
 
 def handle_tree_click(event):
