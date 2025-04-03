@@ -1,76 +1,35 @@
 import sys
 import os
+import traceback
 import shutil
 import subprocess
 import platform
 import threading
 import time
-import tkinter as tk 
-
-# --- CustomTkinter ---
+import tkinter as tk
+import webbrowser
+from pathlib import Path
+import pandas as pd
+import matplotlib.pyplot as plt
 import customtkinter as ctk
 from tkinter import messagebox, filedialog
 from tkinter import ttk
-
-# --- Otras dependencias ---
 from dotenv import load_dotenv
 from pathlib import Path
 import psutil
 import openai
 import math
-try:
-    from PIL import Image, ImageTk # Necesario para el logo
-except ImportError:
-    # Usar CTkToplevel para el error si CTk ya está importado
-    error_win = ctk.CTk()
-    error_win.withdraw() # Ocultar ventana raíz temporal
-    # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-    # APLICAR ICONO A LA VENTANA DE ERROR TEMPORAL
-    try:
-        # Definir ICON_PATH aquí temporalmente si no está definido globalmente aún
-        _ICON_PATH_TEMP = "img/icono.ico"
-        if _ICON_PATH_TEMP and os.path.exists(_ICON_PATH_TEMP) and platform.system() == "Windows":
-            error_win.iconbitmap(_ICON_PATH_TEMP)
-    except Exception as e:
-        print(f"Advertencia: No se pudo aplicar el icono a la ventana de error: {e}")
-    # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
-    messagebox.showerror("Error de Dependencia",
-                         "La biblioteca Pillow no está instalada.\n"
-                         "Por favor, instálala ejecutando: pip install Pillow")
-    error_win.destroy()
-    sys.exit(1) # Salir si Pillow no está instalado
+from PIL import Image, ImageTk
+from openai import error as openai_error_v0
+import tiktoken
+import re
+from typing import Union, Tuple, Dict
+AuthenticationError_v0 = openai_error_v0.AuthenticationError
+InvalidRequestError_v0 = openai_error_v0.InvalidRequestError
+APIConnectionError_v0 = openai_error_v0.APIConnectionError
+OPENAI_V0_ERROR_IMPORTED = True
+OPENAI_V1_CLIENT_EXISTS = False
 
-# --- Manejo de versiones de OpenAI ---
-# Intentar importar errores específicos de v0.x si existen
-try:
-    from openai import error as openai_error_v0
-    AuthenticationError_v0 = openai_error_v0.AuthenticationError
-    InvalidRequestError_v0 = openai_error_v0.InvalidRequestError
-    APIConnectionError_v0 = openai_error_v0.APIConnectionError
-    OPENAI_V0_ERROR_IMPORTED = True
-except ImportError:
-    OPENAI_V0_ERROR_IMPORTED = False
-    # Definir placeholders si v0.x no está o no tiene 'error'
-    class OpenAIError_v0(Exception): pass
-    class AuthenticationError_v0(OpenAIError_v0): pass
-    class InvalidRequestError_v0(OpenAIError_v0): pass
-    class APIConnectionError_v0(OpenAIError_v0): pass
-
-# Asumir que si openai.OpenAI existe, es v1.x+
-# Los errores en v1.x se importan directamente desde openai
-try:
-    from openai import AuthenticationError, InvalidRequestError, APIConnectionError, OpenAIError
-    OPENAI_V1_CLIENT_EXISTS = hasattr(openai, 'OpenAI')
-except ImportError:
-    # Si la importación directa falla, probablemente sea v0.x o muy antiguo
-    OPENAI_V1_CLIENT_EXISTS = False
-    # Definir placeholders para v1 si no se pudieron importar (aunque si v0 existe, esto no debería pasar)
-    class OpenAIError(Exception): pass
-    class AuthenticationError(OpenAIError): pass
-    class InvalidRequestError(OpenAIError): pass
-    class APIConnectionError(OpenAIError): pass
-
-import webbrowser
 
 # ======================================================
 # Global State & Config Variables
@@ -81,15 +40,13 @@ unity_projects_path_ok = False
 apis_key_ok = False
 apis_models_ok = False
 initial_verification_complete = False
-is_build_running = False # Flag to track build process
-
+is_build_running = False
 UNITY_EXECUTABLE = None
 UNITY_PROJECTS_PATH = None
 OPENAI_API_KEY = None
 FINE_TUNED_MODEL_NAME = None
 SECONDARY_FINE_TUNED_MODEL_NAME = None
 UNITY_REQUIRED_VERSION_STRING = "6000.0.32f1" # Versión requerida
-
 SIMULATIONS_DIR = "./Simulations"
 SIMULATION_PROJECT_NAME = "Simulation"
 SIMULATION_PROJECT_PATH = None
@@ -97,118 +54,759 @@ ASSETS_FOLDER = None
 STREAMING_ASSETS_FOLDER = None
 SIMULATION_LOADED_FILE = None
 last_simulation_loaded = None
-all_simulations_data = [] # Para almacenar la lista completa de simulaciones para búsqueda
-
-# Icons (text fallback)
-play_icon_text = "▶" # "Play"
-delete_icon_text = "🗑️" # "Delete"
-loaded_indicator_text = "✓" # "Loaded"
-
-# Tooltip handling
+all_simulations_data = []
+play_icon_text = "▶"
+delete_icon_text = "🗑️"
+loaded_indicator_text = "✓"
 tooltip_window = None
 tooltip_delay = 700
 tooltip_job_id = None
-
-# Referencia global para la imagen del logo
 logo_photo_ref = None
-# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-# DEFINIR RUTA DEL ICONO GLOBALMENTE
-ICON_PATH = "img/icono.ico" # Ruta al icono .ico
-# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+ICON_PATH = "img/icono.ico"
 LOGO_PATHS = ["img/logo_light.png", "img/logo_dark.png"]
 LOGO_WIDTH = 200
-
-# --- CustomTkinter Theme & Font ---
-ctk.set_appearance_mode("System") # Modes: system (default), light, dark
-ctk.set_default_color_theme("blue") # Themes: blue (default), dark-blue, green
-
+ctk.set_appearance_mode("System")
+ctk.set_default_color_theme("blue")
 APP_FONT = ("Segoe UI", 11)
 APP_FONT_BOLD = ("Segoe UI", 11, "bold")
 TITLE_FONT = ("Times New Roman", 22, "bold")
 STATUS_FONT = ("Segoe UI", 10)
 TREEVIEW_FONT = ("Segoe UI", 10)
 TREEVIEW_HEADER_FONT = ("Segoe UI", 10, "bold")
-
 # --- Colores para Botones (Light, Dark) ---
-# Mantener colores generales para diálogos u otros elementos si es necesario
 COLOR_SUCCESS_GENERAL = ("#28a745", "#4CAF50")
 COLOR_DANGER_GENERAL = ("#C62828", "#EF5350")
-COLOR_INFO_GENERAL = ("#218838", "#66BB6A") # Azul info más estándar
-COLOR_WARNING_GENERAL = ("#E53935", "#E53935") # Naranja warning
-COLOR_DISABLED_GENERAL = ("#BDBDBD", "#757575") # Grises para deshabilitado
-COLOR_SIDEBAR_BG = None # Se determinará por tema
+COLOR_INFO_GENERAL = ("#218838", "#66BB6A")
+COLOR_WARNING_GENERAL = ("#E53935", "#E53935")
+COLOR_DISABLED_GENERAL = ("#BDBDBD", "#757575")
+COLOR_SIDEBAR_BG = None
 
-# --- Helper para obtener color actual (Light=0, Dark=1) ---
 def get_color_mode_index():
     return 1 if ctk.get_appearance_mode() == "Dark" else 0
 
 # ======================================================
 # INDIVIDUAL BUTTON COLOR DEFINITIONS (FG, HOVER, TEXT)
-# Cada tupla contiene (Light Mode Color, Dark Mode Color)
 # ======================================================
-
-# --- Sidebar Buttons ---
-# Settings Button
-# ================================================================
-# Refined Button Colors for Modern UI
-# Backgrounds: Light Mode ~ #dbdbdb | Dark Mode ~ #2b2b2b
-# Format: (light_mode_color, dark_mode_color)
-# ================================================================
-
-# --- Neutral Buttons Palette (Used for Settings, Verify, About) ---
-# Ensures consistency for standard/secondary actions.
-_NEUTRAL_FG_COLOR = ("#A0A0A0", "#616161")     # Light: Med-Gray / Dark: Darker Gray (visible on #2b2b2b)
-_NEUTRAL_HOVER_COLOR = ("#888888", "#757575")  # Light: Darker Gray / Dark: Lighter Gray
-_NEUTRAL_TEXT_COLOR = ("#000000", "#FFFFFF")   # Light: Black / Dark: White
-
-# Settings Button
+_NEUTRAL_FG_COLOR = ("#A0A0A0", "#616161")
+_NEUTRAL_HOVER_COLOR = ("#888888", "#757575")
+_NEUTRAL_TEXT_COLOR = ("#000000", "#FFFFFF")
 BTN_SETTINGS_FG_COLOR = _NEUTRAL_FG_COLOR
 BTN_SETTINGS_HOVER_COLOR = _NEUTRAL_HOVER_COLOR
 BTN_SETTINGS_TEXT_COLOR = _NEUTRAL_TEXT_COLOR
-
-# Verify Button
 BTN_VERIFY_FG_COLOR = _NEUTRAL_FG_COLOR
 BTN_VERIFY_HOVER_COLOR = _NEUTRAL_HOVER_COLOR
 BTN_VERIFY_TEXT_COLOR = _NEUTRAL_TEXT_COLOR
-
-# About Button
 BTN_ABOUT_FG_COLOR = _NEUTRAL_FG_COLOR
 BTN_ABOUT_HOVER_COLOR = _NEUTRAL_HOVER_COLOR
 BTN_ABOUT_TEXT_COLOR = _NEUTRAL_TEXT_COLOR
+BTN_UNITY_DOWN_FG_COLOR = ("#4CAF50", "#4CAF50")
+BTN_UNITY_DOWN_HOVER_COLOR = ("#388E3C", "#66BB6A")
+BTN_UNITY_DOWN_TEXT_COLOR = ("#FFFFFF", "#FFFFFF")
+BTN_EXIT_FG_COLOR = ("#E53935", "#E53935")
+BTN_EXIT_HOVER_COLOR = ("#C62828", "#EF5350")
+BTN_EXIT_TEXT_COLOR = ("#FFFFFF", "#FFFFFF")
+BTN_RELOAD_FG_COLOR = ("#1E88E5", "#1E88E5")
+BTN_RELOAD_HOVER_COLOR = ("#1565C0", "#42A5F5")
+BTN_RELOAD_TEXT_COLOR = ("#FFFFFF", "#FFFFFF")
+BTN_GRAPH_FG_COLOR = ("#673AB7", "#673AB7")
+BTN_GRAPH_HOVER_COLOR = ("#512DA8", "#7E57C2")
+BTN_GRAPH_TEXT_COLOR = ("#FFFFFF", "#FFFFFF")
+BTN_CREATE_FG_COLOR = ("#28a745", "#4CAF50")
+BTN_CREATE_HOVER_COLOR = ("#218838", "#66BB6A")
+BTN_CREATE_TEXT_COLOR = ("#FFFFFF", "#FFFFFF")
+BTN_CLEARSEARCH_FG_COLOR = ("#E53935", "#E53935")
+BTN_CLEARSEARCH_HOVER_COLOR = ("#C62828", "#EF5350")
+BTN_CLEARSEARCH_TEXT_COLOR = ("#FFFFFF", "#FFFFFF")
+# ======================================================
+# Start SimulationGraphics
+# ======================================================
+def SimulationGraphics(simulation_name):
+    if not simulation_name:
+        print("Error: Se debe proporcionar un nombre de simulación a la función SimulationGraphics.")
+        return
 
-# --- Specific Action Buttons ---
+    documents_path = Path.home() / "Documents"
+    simulation_folder = documents_path / "SimulationLoggerData" / simulation_name
 
-# Download Unity Hub Button (Green)
-BTN_UNITY_DOWN_FG_COLOR = ("#4CAF50", "#4CAF50") # Light: Std Green / Dark: Std Green (visible on dark bg)
-BTN_UNITY_DOWN_HOVER_COLOR = ("#388E3C", "#66BB6A") # Light: Darker Green / Dark: Lighter Green
-BTN_UNITY_DOWN_TEXT_COLOR = ("#FFFFFF", "#FFFFFF") # Light: White / Dark: White
+    csv_path = simulation_folder / "SimulationStats.csv"
+    output_folder = simulation_folder / "Graficos"
+    output_folder.mkdir(parents=True, exist_ok=True)
 
-# Exit Button (Red)
-BTN_EXIT_FG_COLOR = ("#E53935", "#E53935")     # Light: Std Red / Dark: Std Red (visible on dark bg)
-BTN_EXIT_HOVER_COLOR = ("#C62828", "#EF5350")     # Light: Darker Red / Dark: Lighter Red
-BTN_EXIT_TEXT_COLOR = ("#FFFFFF", "#FFFFFF")     # Light: White / Dark: White
+    if not csv_path.exists():
+        print(f"El archivo CSV no existe en: {csv_path}")
+        return
 
-# Reload List Button (Blue)
-BTN_RELOAD_FG_COLOR = ("#1E88E5", "#1E88E5")     # Light: Std Blue / Dark: Std Blue (visible on dark bg)
-BTN_RELOAD_HOVER_COLOR = ("#1565C0", "#42A5F5")     # Light: Darker Blue / Dark: Lighter Blue
-BTN_RELOAD_TEXT_COLOR = ("#FFFFFF", "#FFFFFF")     # Light: White / Dark: White
+    try:
+        df = pd.read_csv(csv_path, sep=";", engine="python")
+    except Exception as e:
+        print(f"Error al leer el archivo CSV ({csv_path}): {e}")
+        return
 
-# Show Graphs Button (Purple)
-BTN_GRAPH_FG_COLOR = ("#673AB7", "#673AB7")     # Light: Std Purple / Dark: Std Purple (visible on dark bg)
-BTN_GRAPH_HOVER_COLOR = ("#512DA8", "#7E57C2")     # Light: Darker Purple / Dark: Lighter Purple
-BTN_GRAPH_TEXT_COLOR = ("#FFFFFF", "#FFFFFF")     # Light: White / Dark: White
+    df.columns = df.columns.str.strip()
 
-# Create Sim (API) Button (Green - Primary/Positive Action)
-BTN_CREATE_FG_COLOR = ("#28a745", "#4CAF50")     # Light: Bright Green (Bootstrap) / Dark: Std Green (Material)
-BTN_CREATE_HOVER_COLOR = ("#218838", "#66BB6A")     # Light: Darker Green / Dark: Lighter Green
-BTN_CREATE_TEXT_COLOR = ("#FFFFFF", "#FFFFFF")     # Light: White / Dark: White
+    if "Timestamp" not in df.columns:
+        print("[Error] La columna 'Timestamp' no se encontró en el CSV.")
+        return
 
-# --- Search Bar ---
-# Clear Search Button (Orange/Amber - Warning/Utility)
-BTN_CLEARSEARCH_FG_COLOR = ("#E53935", "#E53935") # Light: Amber / Dark: Orange
-BTN_CLEARSEARCH_HOVER_COLOR = ("#C62828", "#EF5350") # Light: Orange / Dark: Lighter Orange/Amber
-BTN_CLEARSEARCH_TEXT_COLOR = ("#FFFFFF", "#FFFFFF") # Light: Black (Good contrast on Amber) / Dark: White (Better harmony)
-# ================================================================
+    df = df[df["Timestamp"].astype(str).str.strip() != "0"]
+
+    df["Timestamp"] = df["Timestamp"].astype(str).str.replace(r'\s+', ' ', regex=True)
+
+    try:
+        df["Timestamp"] = pd.to_datetime(df["Timestamp"], format="%d-%m-%Y %H:%M:%S", errors="coerce")
+    except Exception as e:
+        print(f"Error al convertir la columna Timestamp: {e}")
+
+    initial_rows = len(df)
+    df = df.dropna(subset=["Timestamp"])
+    if len(df) < initial_rows:
+         print(f"Advertencia: Se eliminaron {initial_rows - len(df)} filas debido a formato inválido de Timestamp.")
+
+    if df.empty:
+        print("No quedan datos válidos después de procesar el Timestamp.")
+        return
+
+    known_columns = { # Usar un set para búsquedas más rápidas
+        "Timestamp", "FPS", "RealTime", "SimulatedTime",
+        "DeltaTime", "FrameCount", "Pausado", "Cantidad de organismos"
+    }
+    organism_columns = [col for col in df.columns if col not in known_columns]
+
+    # --- Gráfico 1: FPS over Time ---
+    if "FPS" in df.columns:
+        plt.figure(figsize=(12, 6))
+        plt.plot(df["Timestamp"], df["FPS"], marker=".", linestyle="-", color="blue") # Cambiado a '.' para menos clutter si hay muchos puntos
+        plt.title(f"FPS over Time ({simulation_name})")
+        plt.xlabel("Timestamp")
+        plt.ylabel("FPS")
+        plt.xticks(rotation=45, ha='right') # Mejorar alineación de etiquetas rotadas
+        plt.grid(True, linestyle='--', alpha=0.6) # Estilo de grid más sutil
+        plt.tight_layout()
+        try:
+            plt.savefig(str(output_folder / "fps_over_time.png"))
+        except Exception as e:
+            print(f"Error al guardar fps_over_time.png: {e}")
+        plt.close()
+    else:
+        print("Columna 'FPS' no encontrada, omitiendo gráfico FPS over Time.")
+
+
+    # --- Gráfico 2: RealTime vs SimulatedTime ---
+    if "RealTime" in df.columns and "SimulatedTime" in df.columns:
+        plt.figure(figsize=(12, 6))
+        plt.plot(df["Timestamp"], df["RealTime"], label="RealTime", marker=".", linestyle="-")
+        plt.plot(df["Timestamp"], df["SimulatedTime"], label="SimulatedTime", marker=".", linestyle="-", color="orange")
+        plt.title(f"RealTime vs SimulatedTime ({simulation_name})")
+        plt.xlabel("Timestamp")
+        plt.ylabel("Time (s)")
+        plt.xticks(rotation=45, ha='right')
+        plt.legend()
+        plt.grid(True, linestyle='--', alpha=0.6)
+        plt.tight_layout()
+        try:
+            plt.savefig(str(output_folder / "time_comparison.png"))
+        except Exception as e:
+            print(f"Error al guardar time_comparison.png: {e}")
+        plt.close()
+    else:
+         print("Columnas 'RealTime' o 'SimulatedTime' no encontradas, omitiendo gráfico Time Comparison.")
+
+    # --- Gráfico 3: Organism Counts over Time ---
+    if organism_columns:
+        plt.figure(figsize=(12, 6))
+        for col in organism_columns:
+            # Verificar que la columna exista y sea numérica antes de graficar
+            if col in df.columns and pd.api.types.is_numeric_dtype(df[col]):
+                plt.plot(df["Timestamp"], df[col], label=col, marker=".", linestyle="-")
+            else:
+                print(f"Advertencia: Omitiendo columna de organismo no numérica o faltante: '{col}'")
+        # Solo añadir elementos de gráfico si se graficó algo
+        if plt.gca().has_data():
+            plt.title(f"Organism Counts over Time ({simulation_name})")
+            plt.xlabel("Timestamp")
+            plt.ylabel("Count")
+            plt.xticks(rotation=45, ha='right')
+            plt.legend()
+            plt.grid(True, linestyle='--', alpha=0.6)
+            plt.tight_layout()
+            try:
+                plt.savefig(str(output_folder / "organism_counts.png"))
+            except Exception as e:
+                print(f"Error al guardar organism_counts.png: {e}")
+        plt.close() # Cerrar siempre la figura
+    else:
+        print("No se encontraron columnas de organismos específicas, omitiendo gráfico Organism Counts.")
+
+    # --- Gráfico 4: Total Organisms over Time ---
+    if "Cantidad de organismos" in df.columns:
+        plt.figure(figsize=(12, 6))
+        plt.plot(df["Timestamp"], df["Cantidad de organismos"], marker=".", linestyle="-", color="purple")
+        plt.title(f"Total Organisms over Time ({simulation_name})")
+        plt.xlabel("Timestamp")
+        plt.ylabel("Total Count")
+        plt.xticks(rotation=45, ha='right')
+        plt.grid(True, linestyle='--', alpha=0.6)
+        plt.tight_layout()
+        try:
+            plt.savefig(str(output_folder / "total_organisms.png"))
+        except Exception as e:
+            print(f"Error al guardar total_organisms.png: {e}")
+        plt.close()
+    else:
+        print("Columna 'Cantidad de organismos' no encontrada, omitiendo gráfico Total Organisms.")
+
+    # --- Gráfico 5: Frame Count over Time ---
+    if "FrameCount" in df.columns:
+        plt.figure(figsize=(12, 6))
+        plt.plot(df["Timestamp"], df["FrameCount"], marker=".", linestyle="-", color="darkcyan") # Cambiado color y marcador
+        plt.title(f"Frame Count over Time ({simulation_name})")
+        plt.xlabel("Timestamp")
+        plt.ylabel("Frame Count")
+        plt.xticks(rotation=45, ha='right')
+        plt.grid(True, linestyle='--', alpha=0.6)
+        plt.tight_layout()
+        try:
+            plt.savefig(str(output_folder / "frame_count.png"))
+        except Exception as e:
+            print(f"Error al guardar frame_count.png: {e}")
+        plt.close()
+    else:
+        print("Columna 'FrameCount' no encontrada, omitiendo gráfico Frame Count.")
+
+
+    # --- Gráfico 6: FPS Distribution ---
+    if "FPS" in df.columns and not df["FPS"].isnull().all(): # Verificar que haya datos de FPS
+        plt.figure(figsize=(12, 6))
+        plt.hist(df["FPS"].dropna(), bins=20, color="green", edgecolor="black") # dropna por si acaso
+        plt.title(f"FPS Distribution ({simulation_name})")
+        plt.xlabel("FPS")
+        plt.ylabel("Frequency")
+        plt.grid(True, axis='y', linestyle='--', alpha=0.6) # Grid solo en eje y para histograma
+        plt.tight_layout()
+        try:
+            plt.savefig(str(output_folder / "fps_histogram.png"))
+        except Exception as e:
+             print(f"Error al guardar fps_histogram.png: {e}")
+        plt.close()
+    elif "FPS" in df.columns:
+         print("Columna 'FPS' encontrada pero sin datos válidos, omitiendo histograma FPS.")
+
+    # --- Gráfico 7: Average FPS per Total Organisms ---
+    if "Cantidad de organismos" in df.columns and "FPS" in df.columns and not df["Cantidad de organismos"].isnull().all() and not df["FPS"].isnull().all():
+        # Asegurarse de que 'Cantidad de organismos' sea numérico para agrupar correctamente
+        if pd.api.types.is_numeric_dtype(df["Cantidad de organismos"]):
+             # Convertir a int si es posible para tener categorías más limpias
+            df_agrupable = df.dropna(subset=["Cantidad de organismos", "FPS"])
+            try:
+                 df_agrupable["Cantidad de organismos"] = df_agrupable["Cantidad de organismos"].astype(int)
+            except ValueError:
+                 print("Advertencia: 'Cantidad de organismos' contiene valores no enteros, agrupando por valores flotantes.")
+
+            # Agrupar y calcular media
+            df_grouped = df_agrupable.groupby("Cantidad de organismos")["FPS"].mean().reset_index()
+
+            if not df_grouped.empty:
+                plt.figure(figsize=(12, 6))
+                plt.plot(df_grouped["Cantidad de organismos"], df_grouped["FPS"], marker="o", linestyle="-", color="red")
+                plt.title(f"Average FPS per Total Organisms ({simulation_name})")
+                plt.xlabel("Total Organisms")
+                plt.ylabel("Average FPS")
+                plt.grid(True, linestyle='--', alpha=0.6)
+                plt.tight_layout()
+                try:
+                    plt.savefig(str(output_folder / "total_organisms_vs_fps.png"))
+                except Exception as e:
+                    print(f"Error al guardar total_organisms_vs_fps.png: {e}")
+                plt.close()
+            else:
+                print("No se pudieron agrupar datos para el gráfico Average FPS per Total Organisms.")
+        else:
+            print("Columna 'Cantidad de organismos' no es numérica, omitiendo gráfico Average FPS per Total Organisms.")
+
+    # --- Gráfico 8: Organisms per Simulated Time ---
+    if "SimulatedTime" in df.columns and organism_columns:
+         # Verificar que SimulatedTime sea numérico
+         if pd.api.types.is_numeric_dtype(df["SimulatedTime"]):
+            plt.figure(figsize=(12, 6))
+            plotted_something = False
+            for col in organism_columns:
+                # Verificar de nuevo cada columna de organismo
+                if col in df.columns and pd.api.types.is_numeric_dtype(df[col]):
+                    plt.plot(df["SimulatedTime"], df[col], label=col, marker=".", linestyle="-")
+                    plotted_something = True
+                # No imprimir advertencia aquí de nuevo, ya se hizo en gráfico 3
+
+            if plotted_something:
+                plt.title(f"Organism Count over Simulated Time ({simulation_name})")
+                plt.xlabel("Simulated Time (s)")
+                plt.ylabel("Organism Count")
+                plt.legend()
+                plt.grid(True, linestyle='--', alpha=0.6)
+                plt.tight_layout()
+                try:
+                    plt.savefig(str(output_folder / "organisms_vs_simulated_time.png"))
+                except Exception as e:
+                    print(f"Error al guardar organisms_vs_simulated_time.png: {e}")
+            plt.close()
+         else:
+             print("Columna 'SimulatedTime' no es numérica, omitiendo gráfico Organisms vs Simulated Time.")
+
+    print(f"SimulationGraphics: Los gráficos para '{simulation_name}' se han generado (o intentado generar) y guardado en: {output_folder}")
+# ======================================================
+# End SimulationGraphics
+# ======================================================
+
+# ======================================================
+# Start api_manager
+# ======================================================
+load_dotenv(dotenv_path="./.env")
+openai.api_key = os.getenv("OPENAI_API_KEY")
+FINE_TUNED_MODEL_NAME = os.getenv("FINE_TUNED_MODEL_NAME")
+SECOND_FINE_TUNED_MODEL_NAME = os.getenv("2ND_FINE_TUNED_MODEL_NAME")
+print(f"OPENAI_API_KEY: {openai.api_key}")
+print(f"FINE_TUNED_MODEL_NAME: {FINE_TUNED_MODEL_NAME}")
+print(f"SECOND_FINE_TUNED_MODEL_NAME: {SECOND_FINE_TUNED_MODEL_NAME}")
+
+SYSTEM_MESSAGE_PRIMARY = (
+    "Eres un modelo especializado en generar código C# para simulaciones de Unity. Considera que los tiempos son en segundos; además, los colores en Unity se expresan en valores RGB divididos en 255. Debes contestar tal cual como se te fue entrenado, sin agregar nada más de lo que se espera en C#. No puedes responder en ningún otro lenguaje de programación ni añadir comentarios o palabras innecesarias. Solo puedes responder a consultas relacionadas con simulaciones en Unity sobre EColi, SCerevisiae o ambas, donde se indiquen: - El color de la(s) célula(s). - El tiempo de duplicación en minutos. - El porcentaje de crecimiento para separarse del padre. Tu respuesta debe incluir estrictamente estos scripts en el orden especificado: - Si se piden ambas (EColi y SCerevisiae): 1.PrefabMaterialCreator.cs, 2.CreatePrefabsOnClick.cs, 3.EColiComponent.cs, 4.SCerevisiaeComponent.cs, 5.EColiSystem.cs, 6.SCerevisiaeSystem.cs. - Si se pide solo EColi: 1.PrefabMaterialCreator.cs, 2.CreatePrefabsOnClick.cs, 3.EColiComponent.cs, 4.EColiSystem.cs. - Si se pide solo SCerevisiae: 1.PrefabMaterialCreator.cs, 2.CreatePrefabsOnClick.cs, 3.SCerevisiaeComponent.cs, 4.SCerevisiaeSystem.cs - Si se pide 2 EColi: 1.PrefabMaterialCreator.cs, 2.CreatePrefabsOnClick.cs, 3.EColi_1Component.cs, 4.EColi_2Component.cs, 5.EColi_1System.cs, 6.EColi_2System.cs. - Si se pide 2 SCerevisiae: 1.PrefabMaterialCreator.cs, 2.CreatePrefabsOnClick.cs, 3.SCerevisiae_1Component.cs, 4.SCerevisiae_2Component.cs, 5.SCerevisiae_1System.cs, 6.SCerevisiae_2System.cs. El formato de cada script debe ser \"1.PrefabMaterialCreator.cs{...}2.CreatePrefabsOnClick.cs{...}\" etc. Cualquier pregunta que no cumpla con las características anteriores será respondida con: \"ERROR FORMATO DE PREGUNTA.\"."
+)
+SYSTEM_MESSAGE_SECONDARY = (
+    "Eres un traductor especializado en simulaciones biológicas para Unity. Tu función exclusiva es convertir descripciones en lenguaje natural en especificaciones técnicas estructuradas para EColi y SCerevisiae. Requisitos obligatorios: 1. Solo procesarás 1 o 2 organismos por solicitud 2. Organismos permitidos: exclusivamente EColi (bacteria) y SCerevisiae (levadura) 3. Parámetros requeridos para cada organismo: - Color (en formato nombre o adjetivo+color) - Tiempo de duplicación (en minutos) - Porcentaje de separación padre-hijo (50-95%) Instrucciones estrictas: • Si la solicitud menciona otros organismos, fenómenos no biológicos, o está fuera del contexto de simulaciones celulares: responde exactamente 'ERROR DE CONTENIDO' • Usa el formato: '[Cantidad] [Organismo]. El [Organismo] debe ser de color [color], duplicarse cada [X] minutos y el hijo se separa del padre cuando alcanza el [Y]% del crecimiento.' • Para múltiples organismos del mismo tipo usa sufijos numéricos (Ej: EColi_1, SCerevisiae_2) • Asigna valores por defecto coherentes cuando el usuario no especifique parámetros"
+)
+
+def count_tokens(text: str) -> int:
+    try:
+        encoding = tiktoken.encoding_for_model(FINE_TUNED_MODEL_NAME)
+    except Exception:
+        encoding = tiktoken.get_encoding("cl100k_base")
+    return len(encoding.encode(text))
+
+def check_api_connection() -> bool:
+    try:
+        openai.Model.list()
+        return True
+    except Exception as e:
+        print("Error al conectar con la API:", e)
+        return False
+
+def call_api_generic(pregunta: str, model_name: str, system_message: str) -> tuple:
+    if not check_api_connection():
+        return "", 0, 0
+
+    try:
+        messages = [
+            {"role": "system", "content": system_message},
+            {"role": "user", "content": pregunta}
+        ]
+        
+        input_tokens = count_tokens(system_message) + count_tokens(pregunta)
+        response = openai.ChatCompletion.create(
+            model=model_name,
+            messages=messages,
+            temperature=0,
+            timeout=30
+        )
+        
+        reply = response.choices[0].message["content"].strip()
+        output_tokens = count_tokens(reply)
+        return reply, input_tokens, output_tokens
+    except Exception as e:
+        print(f"Error al llamar al modelo {model_name}: {e}")
+        return "", 0, 0
+
+def call_primary_model(pregunta: str) -> tuple:
+    return call_api_generic(pregunta, FINE_TUNED_MODEL_NAME, SYSTEM_MESSAGE_PRIMARY)
+
+def call_secondary_model(pregunta: str) -> tuple:
+    return call_api_generic(pregunta, SECOND_FINE_TUNED_MODEL_NAME, SYSTEM_MESSAGE_SECONDARY)
+
+def split_braces_outside_strings(code: str) -> str:
+    result_lines = []
+    in_string = False
+    for line in code.splitlines(keepends=True):
+        new_line_chars = []
+        i = 0
+        while i < len(line):
+            ch = line[i]
+            if ch == '"':
+                in_string = not in_string
+                new_line_chars.append(ch)
+            elif ch == '{' and not in_string:
+                new_line_chars.append('\n{\n')
+            elif ch == '}' and not in_string:
+                new_line_chars.append('\n}\n')
+            else:
+                new_line_chars.append(ch)
+            i += 1
+        result_lines.append(''.join(new_line_chars))
+    return ''.join(result_lines)
+
+def separar_codigos_por_archivo(respuesta: str) -> dict:
+    patrones = re.findall(r'(\d+)\.(\w+\.cs)\{(.*?)}(?=\d+\.|$)', respuesta, re.DOTALL)
+    if not patrones:
+        print("No se encontraron bloques de código en la respuesta.")
+        return {}
+
+    codigos = {}
+    for _, archivo, contenido in patrones:
+        codigos[archivo] = format_csharp(contenido.strip())
+    return codigos
+
+def format_csharp(contenido: str) -> str:
+    preprocesado = split_braces_outside_strings(contenido)
+    preprocesado = re.sub(r';', r';\n', preprocesado)
+    preprocesado = re.sub(r'\n\s*\n', '\n', preprocesado)
+    lineas = [l.strip() for l in preprocesado.split('\n') if l.strip()]
+    nivel_indentacion = 0
+    contenido_formateado = []
+    indent_char = "    "
+    for linea in lineas:
+        if linea.startswith("}"):
+            nivel_indentacion = max(nivel_indentacion - 1, 0)
+        contenido_formateado.append(indent_char * nivel_indentacion + linea)
+        if linea.endswith("{"):
+            nivel_indentacion += 1
+    return "\n".join(contenido_formateado)
+
+def import_codes(codes: dict, simulation_name: str) -> bool:
+    base_dir = os.getcwd()
+    simulation_folder = os.path.join(base_dir, "Simulations", simulation_name)
+
+    if os.path.exists(simulation_folder):
+        if os.path.isdir(simulation_folder):
+             print(f"Advertencia: La carpeta de simulación '{simulation_name}' ya existe en {simulation_folder}.")
+        else:
+             print(f"Error: Ya existe un archivo llamado '{simulation_name}' en la ubicación de Simulaciones. Elija otro nombre.")
+             return False
+
+    template_folder = os.path.join(base_dir, "Template")
+    if not os.path.exists(template_folder) or not os.path.isdir(template_folder):
+         print(f"Error: No se encontró la carpeta 'Template' en {base_dir}. No se puede crear la simulación.")
+         return False
+
+    try:
+        if not os.path.exists(simulation_folder):
+            shutil.copytree(template_folder, simulation_folder)
+            print(f"Estructura de Template copiada a: {simulation_folder}")
+        else:
+            print(f"Usando carpeta de simulación existente: {simulation_folder}")
+    except Exception as e:
+        print(f"Error al copiar la estructura del Template: {e}")
+        return False
+
+    assets_editor_folder = os.path.join(simulation_folder, "Assets", "Editor")
+    assets_scripts_folder = os.path.join(simulation_folder, "Assets", "Scripts")
+    assets_scripts_components = os.path.join(assets_scripts_folder, "Components")
+    assets_scripts_systems = os.path.join(assets_scripts_folder, "Systems")
+    assets_scripts_general = os.path.join(assets_scripts_folder, "General")
+
+    os.makedirs(assets_editor_folder, exist_ok=True)
+    os.makedirs(assets_scripts_components, exist_ok=True)
+    os.makedirs(assets_scripts_systems, exist_ok=True)
+    os.makedirs(assets_scripts_general, exist_ok=True)
+
+    template_system_path = os.path.join(template_folder, "Assets", "Scripts", "Systems", "GeneralSystem.cs")
+    if not os.path.exists(template_system_path):
+        print(f"Advertencia: No se encontró el archivo template 'GeneralSystem.cs' en {template_system_path}. Los scripts de sistema se escribirán directamente.")
+        template_system_path = None
+
+    template_create_path = os.path.join(template_folder, "Assets", "Scripts", "General", "CreatePrefabsOnClick.cs")
+    if not os.path.exists(template_create_path):
+        print(f"Advertencia: No se encontró el archivo template 'CreatePrefabsOnClick.cs' en {template_create_path}. Este script se escribirá directamente.")
+        template_create_path = None
+
+    files_processed = []
+    for file_name, content in codes.items():
+        dest_path = ""
+        new_content = content
+
+        try:
+            if file_name == "PrefabMaterialCreator.cs":
+                dest_path = os.path.join(assets_editor_folder, file_name)
+                new_content = (
+                    "#if UNITY_EDITOR\n"
+                    "using UnityEngine;\n"
+                    "using UnityEditor;\n"
+                    "using System.IO;\n\n"
+                    f"{content}\n"
+                    "#endif\n"
+                )
+            elif "Component.cs" in file_name:
+                dest_path = os.path.join(assets_scripts_components, file_name)
+            elif "System.cs" in file_name:
+                dest_path = os.path.join(assets_scripts_systems, file_name)
+                if template_system_path:
+                    try:
+                        with open(template_system_path, "r", encoding="utf-8") as f:
+                            template_lines = f.readlines()
+                        organism_name = file_name.replace("System.cs", "")
+                        new_class_declaration = f"public partial class {organism_name}System : SystemBase"
+                        new_component_declaration = f"{organism_name}Component"
+                        temp_content = "".join(template_lines)
+                        temp_content = temp_content.replace("public partial class GeneralSystem : SystemBase", new_class_declaration)
+                        temp_content = temp_content.replace("GeneralComponent", new_component_declaration)
+                        template_lines = temp_content.splitlines(keepends=True)
+                        insertion_index = -1
+                        target_line_content = "transform.Scale=math.lerp(initialScale,maxScale,t);}"
+                        for i, line in enumerate(template_lines):
+                             if target_line_content in line.replace(" ", "").replace("\t", ""):
+                                 insertion_index = i
+                                 break
+                        if insertion_index != -1:
+                            template_lines.insert(insertion_index + 1, "\n" + content + "\n")
+                            new_content = "".join(template_lines)
+                        else:
+                            print(f"Advertencia: No se encontró la línea de inserción ('{target_line_content}') en {template_system_path} para {file_name}. Se usará el contenido recibido directamente.")
+                            new_content = content
+                    except Exception as e:
+                        print(f"Error procesando template de sistema para {file_name}: {e}. Se usará el contenido recibido directamente.")
+                        new_content = content
+            elif file_name == "CreatePrefabsOnClick.cs":
+                 dest_path = os.path.join(assets_scripts_general, file_name)
+                 if template_create_path:
+                      try:
+                           with open(template_create_path, "r", encoding="utf-8") as f:
+                                template_lines = f.readlines()
+                           insertion_index = -1
+                           target_signature = "private void CargarPrefabs()"
+                           target_content_part = "Resources.LoadAll<GameObject>"
+                           for i, line in enumerate(template_lines):
+                                if target_signature in line and target_content_part in line:
+                                     insertion_index = i
+                                     break
+                           if insertion_index != -1:
+                                template_lines.insert(insertion_index + 1, "\n" + content + "\n")
+                                new_content = "".join(template_lines)
+                           else:
+                                print(f"Advertencia: No se encontró la línea de inserción ('{target_signature}' y '{target_content_part}') en {template_create_path}. Se usará el contenido recibido directamente.")
+                                new_content = content 
+                      except Exception as e:
+                           print(f"Error procesando template CreatePrefabsOnClick para {file_name}: {e}. Se usará el contenido recibido directamente.")
+                           new_content = content
+            else:
+                print(f"Advertencia: Archivo no reconocido '{file_name}'. Se colocará en Assets/Scripts/General.")
+                dest_path = os.path.join(assets_scripts_general, file_name)
+
+            if dest_path:
+                os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+                with open(dest_path, "w", encoding="utf-8") as f:
+                    f.write(new_content)
+                print(f"Archivo '{os.path.basename(dest_path)}' guardado en {os.path.dirname(dest_path)}")
+                files_processed.append(dest_path)
+            else:
+                 print(f"Error: No se pudo determinar la ruta de destino para '{file_name}'. Archivo omitido.")
+        except Exception as e:
+            print(f"Error procesando el archivo '{file_name}': {e}")
+
+    template_system_dest = os.path.join(assets_scripts_systems, "GeneralSystem.cs")
+    if os.path.exists(template_system_dest):
+        try:
+            os.remove(template_system_dest)
+            print(f"Archivo template '{os.path.basename(template_system_dest)}' eliminado de la simulación.")
+        except Exception as e:
+            print(f"Error al eliminar '{os.path.basename(template_system_dest)}': {e}")
+
+    if files_processed:
+        return True
+    else:
+        print("No se procesaron archivos.")
+        return False
+
+DELIMITER = "%|%"
+RESPONSES_CSV = os.path.join(".", "Responses", "Responses.csv")
+
+def get_next_id(csv_path: str) -> int:
+    if not os.path.exists(csv_path):
+        return 1
+    last_id = 0
+    try:
+        with open(csv_path, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+            if len(lines) < 2:
+                return 1
+            for line in reversed(lines):
+                line = line.strip()
+                if line:
+                    try:
+                        parts = line.split(DELIMITER)
+                        last_id = int(parts[0])
+                        return last_id + 1
+                    except (IndexError, ValueError):
+                        print(f"Advertencia: Ignorando línea mal formada en CSV: {line}")
+                        continue
+            return 1
+    except FileNotFoundError:
+         return 1
+    except Exception as e:
+         print(f"Error leyendo CSV para obtener el siguiente ID: {e}. Iniciando desde ID 1.")
+         return 1
+
+def write_response_to_csv(pregunta: str, respuesta: str, input_tokens: int, output_tokens: int) -> None:
+    responses_folder = os.path.join(".", "Responses")
+    os.makedirs(responses_folder, exist_ok=True)
+    write_header = not os.path.exists(RESPONSES_CSV) or os.path.getsize(RESPONSES_CSV) == 0
+    next_id = get_next_id(RESPONSES_CSV)
+
+    try:
+        with open(RESPONSES_CSV, "a", encoding="utf-8") as f:
+            if not write_header:
+                 f.seek(0, os.SEEK_END)
+                 if f.tell() > 0:
+                      f.seek(f.tell() - 1, os.SEEK_SET)
+                      last_char = f.read(1)
+                      if last_char != '\n':
+                           f.write('\n')
+            if write_header:
+                f.write(f"id{DELIMITER}pregunta{DELIMITER}respuesta{DELIMITER}input_tokens{DELIMITER}output_tokens\n")
+            clean_pregunta = str(pregunta).replace(DELIMITER, "<DELIM>").replace('\n', '\\n').replace('\r', '')
+            clean_respuesta = str(respuesta).replace(DELIMITER, "<DELIM>").replace('\n', '\\n').replace('\r', '')
+            line = f"{next_id}{DELIMITER}{clean_pregunta}{DELIMITER}{clean_respuesta}{DELIMITER}{input_tokens}{DELIMITER}{output_tokens}\n"
+            f.write(line)
+        print(f"Respuesta guardada en: {RESPONSES_CSV} (id: {next_id})")
+    except IOError as e:
+        print(f"Error de E/S al escribir en {RESPONSES_CSV}: {e}")
+    except Exception as e:
+        print(f"Error inesperado al escribir en CSV: {e}")
+
+def get_cached_response(pregunta: str) -> Union[str, None]:
+    if not os.path.exists(RESPONSES_CSV):
+        return None
+    try:
+        with open(RESPONSES_CSV, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+        clean_pregunta_search = str(pregunta).replace(DELIMITER, "<DELIM>").replace('\n', '\\n').replace('\r', '')
+        for line in lines[1:]:
+            line = line.strip()
+            if not line: continue
+            parts = line.split(DELIMITER)
+            if len(parts) == 5:
+                cached_pregunta = parts[1]
+                cached_respuesta_raw = parts[2]
+                if cached_pregunta == clean_pregunta_search:
+                    original_respuesta = cached_respuesta_raw.replace('\\n', '\n').replace("<DELIM>", DELIMITER)
+                    return original_respuesta
+            else:
+                print(f"Advertencia: Ignorando línea CSV con formato incorrecto (partes={len(parts)}): {line[:100]}...")
+    except FileNotFoundError:
+         return None
+    except Exception as e:
+         print(f"Error leyendo el caché desde {RESPONSES_CSV}: {e}")
+         return None
+    return None
+
+def api_manager(simulation_name: str, simulation_description: str, use_cache: bool = True) -> bool:
+    print(f"\n--- Iniciando Proceso para Simulación: '{simulation_name}' ---")
+    print(f"Descripción recibida: \"{simulation_description}\"")
+
+    # 1. Validar y Formatear la Pregunta con el Modelo Secundario
+    print("\n1. Validando y formateando descripción con modelo secundario...")
+    formatted_pregunta, second_input_tk, second_output_tk = call_secondary_model(simulation_description)
+
+    # Manejo de errores específicos del modelo secundario o de conexión
+    if formatted_pregunta.startswith("Error:") or (not formatted_pregunta and second_input_tk == 0 and second_output_tk == 0):
+         error_msg = f"Error from validation model: {formatted_pregunta}. Possible causes: Invalid API Key, connection issue, model unavailable/misconfigured."
+         print(f"Error crítico del modelo secundario: {error_msg}") # Keep logging
+         return False, error_msg
+
+    # Manejo de errores de contenido/formato detectados por el modelo secundario
+    formatted_pregunta_strip = formatted_pregunta.strip()
+    if formatted_pregunta_strip == "ERROR DE CONTENIDO":
+        error_msg = "Invalid Content: The description must exclusively refer to E.Coli and/or S.Cerevisiae and their parameters."
+        print("Error: " + error_msg)
+        return False, error_msg
+    elif formatted_pregunta_strip == "ERROR DE CANTIDAD EXCEDIDA":
+        error_msg = "Exceeded Organism Limit: The maximum number of organisms (3) was exceeded."
+        print("Error: " + error_msg)
+        return False, error_msg
+    elif "ERROR" in formatted_pregunta_strip.upper(): # Captura otros posibles errores
+        error_msg = f"Validation Model Error: {formatted_pregunta_strip}"
+        print("Error: " + error_msg)
+        return False, error_msg
+
+    print(f"Descripción validada y formateada:\n{formatted_pregunta}")
+
+    # 2. Buscar en Caché o Generar con Modelo Primario
+    final_response = None
+    cache_hit = False
+    total_input_tokens = second_input_tk
+    total_output_tokens = second_output_tk
+
+    if use_cache:
+        print("\n2. Buscando respuesta en caché...")
+        cached_response = get_cached_response(formatted_pregunta)
+        if cached_response:
+            print("   Respuesta encontrada en caché.")
+            final_response = cached_response
+            cache_hit = True
+    else:
+        print("\n2. Caché deshabilitado. Procediendo a generar código.")
+
+
+    if not final_response:
+        if not cache_hit and use_cache:
+             print("   Respuesta no encontrada en caché.")
+        print("   Generando código con modelo primario...")
+
+        primary_response, primary_input_tk, primary_output_tk = call_primary_model(formatted_pregunta)
+        total_input_tokens += primary_input_tk
+        total_output_tokens += primary_output_tk
+
+        # Manejo de errores del modelo primario
+        if primary_response.startswith("Error:") or (not primary_response and primary_input_tk == 0 and primary_output_tk == 0):
+            error_msg = f"Critical error from primary model: {primary_response}. Check API Key/connection/model ID."
+            print("Error: " + error_msg)
+            return False, error_msg
+
+        if "ERROR FORMATO DE PREGUNTA" in primary_response.upper():
+             error_msg = f"Format Error: The primary model rejected the formatted prompt:\n'{formatted_pregunta}'"
+             print("Error: " + error_msg)
+             return False, error_msg
+
+        final_response = primary_response
+        print("   Código generado.")
+
+        # Guardar en caché si no hubo hit y el caché está habilitado
+        if use_cache:
+            write_response_to_csv(formatted_pregunta, final_response, total_input_tokens, total_output_tokens)
+
+    # Verificar que tengamos una respuesta final
+    if not final_response:
+         error_msg = "Critical Error: No final response obtained (neither from cache nor API)."
+         print(error_msg)
+         return False, error_msg
+
+    # 3. Separar y Formatear Códigos
+    print("\n3. Extrayendo y formateando códigos C#...")
+    codes = separar_codigos_por_archivo(final_response)
+
+    if not codes:
+        error_msg = f"Code Extraction Error: Could not extract valid C# code blocks from the response.\nResponse start:\n{final_response[:200]}..."
+        print("Error: " + error_msg)
+        return False, error_msg
+
+    print(f"   Se extrajeron y formatearon {len(codes)} scripts:")
+    for filename in codes.keys():
+        print(f"   - {filename}")
+
+    # 4. Importar Códigos al Proyecto
+    print(f"\n4. Importando códigos a la simulación '{simulation_name}'...")
+    success = import_codes(codes, simulation_name)
+
+    if success:
+        final_sim_path = os.path.join(SIMULATIONS_DIR, simulation_name)
+        print(f"\n--- Proceso Completado Exitosamente ---")
+        print(f"Simulación '{simulation_name}' creada/actualizada en: {final_sim_path}")
+        return True, None
+    else:
+        error_msg = f"File Import Error: Failed to save generated scripts for '{simulation_name}'. Check console logs for details on specific file issues."
+        print("\n--- Process Failed (Import Stage) ---")
+        print(error_msg)
+        return False, error_msg 
+
+
+# ======================================================
+# End api_manager
+# ======================================================
 
 # ======================================================
 # GUI Utilities & Interaction Control
@@ -219,46 +817,28 @@ def center_window(window, width, height):
     x, y = (sw - width) // 2, (sh - height) // 2
     window.geometry(f"{width}x{height}+{x}+{y}")
 
-# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-# FUNCIÓN PARA APLICAR EL ICONO
 def apply_icon(window):
     """Aplica el icono global (ICON_PATH) a la ventana dada."""
     try:
-        # Comprobar si la ruta del icono está definida, existe el archivo y estamos en Windows
         if ICON_PATH and os.path.exists(ICON_PATH) and platform.system() == "Windows":
             window.iconbitmap(ICON_PATH)
-        # Opcional: Podrías añadir lógica para otros OS aquí usando iconphoto si tuvieras un .png
-        # elif ICON_PATH_PNG and os.path.exists(ICON_PATH_PNG):
-        #     img = tk.PhotoImage(file=ICON_PATH_PNG)
-        #     # Para que funcione en Toplevels después de cerrar main, la imagen debe ser referenciada
-        #     window.tk.call('wm', 'iconphoto', window._w, img) # Forma estándar
-        #     # O almacenar la referencia en la ventana misma si es necesario:
-        #     # window.iconphoto(True, img) # CTk/Tkinter forma
-        #     # window._icon_photo_ref = img # Mantener referencia explícita
     except tk.TclError as e:
-        # Error común si el formato del icono es inválido o la ventana no lo soporta
         print(f"Advertencia: Icono '{ICON_PATH}' no aplicable a una ventana. Error: {e}")
     except Exception as e:
-        # Captura cualquier otro error inesperado
         print(f"Error inesperado al aplicar icono: {e}")
-# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
 
 class CustomInputDialog(ctk.CTkToplevel):
     def __init__(self, parent, title, prompt, width=400, height=170):
         super().__init__(parent)
         self.title(title)
-        # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-        apply_icon(self) # Aplicar icono al crear el diálogo
-        # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+        apply_icon(self)
         center_window(self, width, height)
         self.resizable(False, False); self.transient(parent); self.grab_set()
         self.result = None
-
         self.grid_columnconfigure(0, weight=1); self.grid_rowconfigure((0, 1), weight=1); self.grid_rowconfigure(2, weight=0)
         ctk.CTkLabel(self, text=prompt, font=APP_FONT).grid(row=0, column=0, padx=20, pady=(20, 10), sticky="w")
         self.entry = ctk.CTkEntry(self, font=APP_FONT, width=width-40); self.entry.grid(row=1, column=0, padx=20, pady=5, sticky="ew")
         button_frame = ctk.CTkFrame(self, fg_color="transparent"); button_frame.grid(row=2, column=0, padx=20, pady=(10, 20), sticky="e")
-        # Usar colores generales para diálogos por simplicidad
         mode_idx = get_color_mode_index()
         ok_button = ctk.CTkButton(button_frame, text="OK", command=self.ok, width=80, font=APP_FONT, fg_color=COLOR_SUCCESS_GENERAL[mode_idx]); ok_button.pack(side="left", padx=(0, 10))
         cancel_button = ctk.CTkButton(button_frame, text="Cancel", command=self.cancel, width=80, font=APP_FONT, fg_color=COLOR_WARNING_GENERAL[mode_idx], hover_color=COLOR_DANGER_GENERAL[mode_idx]); cancel_button.pack(side="left")
@@ -271,17 +851,15 @@ def custom_askstring(title, prompt):
     if 'main_window' in globals() and main_window.winfo_exists(): return CustomInputDialog(main_window, title, prompt).result
     print(f"Warn: Main window N/A for dialog '{title}'."); return None
 
-# --- Tooltip Functions ---
 def show_tooltip(widget, text):
     global tooltip_window; hide_tooltip()
-    try: x, y = widget.winfo_pointerxy(); x += 20; y += 10 # Default position near cursor
-    except: return # If widget destroyed
-    if isinstance(widget, ttk.Treeview): pass # Keep cursor position for treeview
+    try: x, y = widget.winfo_pointerxy(); x += 20; y += 10
+    except: return
+    if isinstance(widget, ttk.Treeview): pass
     else:
-        try: x, y, h = widget.winfo_rootx(), widget.winfo_rooty(), widget.winfo_height(); y += h + 5 # Below widget
-        except: pass # Use cursor pos if fails
+        try: x, y, h = widget.winfo_rootx(), widget.winfo_rooty(), widget.winfo_height(); y += h + 5
+        except: pass
     tooltip_window = tk.Toplevel(widget); tooltip_window.wm_overrideredirect(True); tooltip_window.wm_geometry(f"+{x}+{y}")
-    # Nota: Las ventanas con overrideredirect(True) normalmente no muestran icono. No llamamos a apply_icon aquí.
     label = tk.Label(tooltip_window, text=text, justify='left', background="#ffffe0", relief='solid', borderwidth=1, font=("Segoe UI", 9)); label.pack(ipadx=1)
 
 def hide_tooltip():
@@ -300,7 +878,24 @@ def cancel_tooltip(widget):
     if tooltip_job_id: widget.after_cancel(tooltip_job_id); tooltip_job_id = None
     hide_tooltip()
 
-# --- Interaction Control ---
+def on_closing():
+    global is_build_running
+    if is_build_running:
+        messagebox.showwarning("Operation in Progress", "Please wait for the current build/load operation to finish before closing.")
+        return
+
+    if messagebox.askokcancel(
+        title="Confirmar Salida",
+        message="¿Está seguro de que desea salir de Unity Simulation Manager?",
+        icon='question'
+        ):
+        update_status("Cerrando aplicación...")
+        print("Attempting to close associated Unity instances (if any)...")
+        close_unity_thread = threading.Thread(target=ensure_unity_closed, daemon=True)
+        close_unity_thread.start()
+        print("Closing GUI...")
+        main_window.after(200, main_window.destroy)
+
 def disable_all_interactions():
     global is_build_running; is_build_running = True
     try:
@@ -324,7 +919,7 @@ def enable_all_interactions():
         if 'clear_search_btn' in globals(): clear_search_btn.configure(state="normal")
         sim_tree.bind("<Button-1>", handle_tree_click); sim_tree.bind("<Motion>", handle_tree_motion)
         sim_tree.configure(cursor="")
-        update_button_states() # Update based on current state
+        update_button_states()
     except (NameError, tk.TclError) as e: print(f"Warning: Could not re-enable interactions: {e}")
 
 
@@ -378,7 +973,7 @@ def open_graphs_folder(simulation_name):
     except Exception as e: messagebox.showerror("Error", f"Could not open graphs folder '{fldr}':\n{e}")
 
 def get_folder_size(path):
-    total = 0;
+    total = 0
     try:
         for entry in os.scandir(path):
             if entry.is_file(follow_symlinks=False): total += entry.stat(follow_symlinks=False).st_size
@@ -401,7 +996,7 @@ def get_build_target_and_executable(project_path):
     if sistema == "Windows": target, pfolder, suff = "Win64", "Windows", ".exe"
     elif sistema == "Linux": target, pfolder, suff = "Linux64", "Linux", ""
     elif sistema == "Darwin": target, pfolder, suff = "OSXUniversal", "Mac", ".app"
-    else: target, pfolder, suff = "Win64", "Windows", ".exe"
+    else: target, pfolder, suff = "Win64", "Windows", ".exe" # Default a Windows
     build_base = os.path.join(project_path, "Build", pfolder)
     ejecutable = os.path.join(build_base, exe_name + suff)
     return target, ejecutable
@@ -431,7 +1026,7 @@ def get_simulations():
 
 def update_last_opened(sim_name):
     folder = os.path.join(SIMULATIONS_DIR, sim_name)
-    try: os.makedirs(folder, exist_ok=True);
+    try: os.makedirs(folder, exist_ok=True)
     except: pass
     try:
         with open(os.path.join(folder, "last_opened.txt"), "w") as f: f.write(str(time.time()))
@@ -476,7 +1071,7 @@ def load_simulation(sim_name):
 
     if not copy_ok: update_status("Copy error. Load cancelled."); return False
     try:
-        os.makedirs(STREAMING_ASSETS_FOLDER, exist_ok=True);
+        os.makedirs(STREAMING_ASSETS_FOLDER, exist_ok=True)
         with open(SIMULATION_LOADED_FILE, "w") as f: f.write(sim_name)
         print(f"State file updated with: {sim_name}")
     except Exception as e: messagebox.showwarning("Error", f"Could not create StreamingAssets or state file:\n{e}")
@@ -486,15 +1081,11 @@ def load_simulation(sim_name):
     return True
 
 def delete_simulation(sim_name):
-    # Corrected messagebox call:
-    # Provide title and message as positional arguments, options as keywords.
     confirm = messagebox.askyesno(
-        "Confirm Deletion",  # Argument 1: title
-        f"Permanently delete '{sim_name}' and all associated data (logs, graphs)?\n\nThis action cannot be undone.", # Argument 2: message
-        icon='warning'       # Keyword argument for options
-        # Removed the duplicate title="Confirm Deletion" keyword argument
+        "Confirm Deletion",
+        f"Permanently delete '{sim_name}' and all associated data (logs, graphs)?\n\nThis action cannot be undone.",
+        icon='warning'
     )
-
     if not confirm:
         update_status("Deletion cancelled.")
         return
@@ -503,84 +1094,68 @@ def delete_simulation(sim_name):
     errs = False
     global last_simulation_loaded, all_simulations_data
 
-    # --- State file handling ---
-    # Check SIMULATION_LOADED_FILE existence *before* trying to use it
-    loaded_sim_path = SIMULATION_LOADED_FILE # Use a local variable for clarity
+    # --- Manejo del archivo de estado ---
+    loaded_sim_path = SIMULATION_LOADED_FILE
     if loaded_sim_path and os.path.exists(loaded_sim_path):
         try:
-            # It's generally safer to read the file *once* if needed multiple times
             loaded = read_last_loaded_simulation_name()
             if loaded == sim_name:
                 os.remove(loaded_sim_path)
                 print(f"State file '{loaded_sim_path}' removed.")
-                # Also clear the global if it matches, regardless of file content
                 if last_simulation_loaded == sim_name:
                     last_simulation_loaded = None
-            # If the file existed but didn't contain sim_name, we might still need to clear the global
             elif last_simulation_loaded == sim_name:
                  last_simulation_loaded = None
-
         except Exception as e:
-            # Be more specific about the warning if possible
             print(f"Warn: Could not read or remove state file '{loaded_sim_path}': {e}")
-    # Ensure global is cleared even if state file didn't exist or couldn't be read
     elif last_simulation_loaded == sim_name:
          last_simulation_loaded = None
 
-
-    # --- Simulation directory deletion ---
+    # --- Eliminación del directorio de simulación ---
     sim_p = os.path.join(SIMULATIONS_DIR, sim_name)
     if os.path.exists(sim_p):
         try:
-            # Using ignore_errors=True might hide underlying issues.
-            # It's often better to try rmtree once and handle specific exceptions if needed.
-            # The time.sleep is unlikely to be necessary unless dealing with specific OS locking issues.
             shutil.rmtree(sim_p)
             print(f"Simulation directory '{sim_p}' removed.")
         except PermissionError as e:
              messagebox.showerror("Error", f"Permission denied deleting simulation folder:\n{sim_p}\n{e}")
              errs = True
-        except OSError as e: # Catch other OS-level errors
+        except OSError as e:
              messagebox.showerror("Error", f"Could not delete simulation folder:\n{sim_p}\n{e}")
              errs = True
-        except Exception as e: # Catch unexpected errors
+        except Exception as e:
              messagebox.showerror("Error", f"An unexpected error occurred deleting simulation folder:\n{sim_p}\n{e}")
              errs = True
 
-    # --- Data directory deletion ---
-    # Use try-except around Path.home() in case it fails (less likely but possible)
+    # --- Eliminación del directorio de datos ---
     try:
-        # Use Path objects consistently for cleaner path handling
         data_p = Path.home() / "Documents" / "SimulationLoggerData" / sim_name
-        if data_p.is_dir(): # Check if it exists *and* is a directory
+        if data_p.is_dir():
             try:
                 shutil.rmtree(data_p)
                 print(f"Data directory '{data_p}' removed.")
             except PermissionError as e:
                 messagebox.showerror("Error", f"Permission denied deleting data folder:\n{data_p}\n{e}")
                 errs = True
-            except OSError as e: # Catch other OS-level errors
+            except OSError as e:
                  messagebox.showerror("Error", f"Could not delete data folder:\n{data_p}\n{e}")
                  errs = True
-            except Exception as e: # Catch unexpected errors
+            except Exception as e:
                 messagebox.showerror("Error", f"An unexpected error occurred deleting data folder:\n{data_p}\n{e}")
                 errs = True
     except Exception as e:
          print(f"Warn: Could not determine or access data directory path: {e}")
-         # Decide if this constitutes an error for the final status message
-         # errs = True # Optionally mark as error if data dir is critical
 
-    # --- Update internal data structure ---
-    # Create a new list excluding the deleted simulation
-    all_simulations_data = [s for s in all_simulations_data if s.get('name') != sim_name] # Use .get for safety
+    # --- Actualizar estructura de datos interna ---
+    all_simulations_data = [s for s in all_simulations_data if s.get('name') != sim_name]
 
-    # --- Final status update and UI refresh ---
+    # --- Actualización final de estado y UI ---
     if errs:
         update_status(f"Deletion of '{sim_name}' completed with errors.")
     else:
         update_status(f"Deletion of '{sim_name}' successful.")
 
-    populate_simulations() # Refresh the UI list
+    populate_simulations()
 
 
 # ======================================================
@@ -641,11 +1216,11 @@ def run_unity_batchmode(exec_method, op_name, log_file, timeout=600, extra_args=
         update_status(f"[{op_name.capitalize()}] Unity process finished."); success = True
         if "BuildScript.PerformBuild" in exec_method:
             update_status(f"[{op_name.capitalize()}] Verifying build output..."); _, exe_path = get_build_target_and_executable(SIMULATION_PROJECT_PATH); found = False
-            for attempt in range(6):
-                if exe_path and os.path.exists(exe_path): found = True; print(f"DEBUG build: OK (att {attempt+1}): {exe_path}"); break
-                print(f"DEBUG build: Check att {attempt+1} fail for {exe_path}"); time.sleep(0.5)
+            for attempt in range(6): # Check multiple times for filesystem delay
+                if exe_path and os.path.exists(exe_path): found = True; print(f"Build check OK (attempt {attempt+1}): {exe_path}"); break
+                print(f"Build check attempt {attempt+1} failed for {exe_path}"); time.sleep(0.5)
             if found: update_status(f"[{op_name.capitalize()}] Executable verified.")
-            else: print(f"WARN build: Executable NOT FOUND: {exe_path}"); success = False; handle_unity_execution_error(FileNotFoundError(f"Build output not found: {exe_path}"), op_name); update_status(f"[Error] {op_name.capitalize()} failed: Output missing.")
+            else: print(f"WARN: Build Executable NOT FOUND: {exe_path}"); success = False; handle_unity_execution_error(FileNotFoundError(f"Build output not found: {exe_path}"), op_name); update_status(f"[Error] {op_name.capitalize()} failed: Output missing.")
     except subprocess.CalledProcessError as e: handle_unity_execution_error(e, op_name); update_status(f"[Error] {op_name.capitalize()} fail (code {e.returncode}). Log: {log_path}"); print(f"--- Unity Output on Error ({op_name}) ---\n{e.stdout}\n{e.stderr}")
     except subprocess.TimeoutExpired as e: handle_unity_execution_error(e, op_name); update_status(f"[Error] {op_name.capitalize()} timed out. Log: {log_path}")
     except (FileNotFoundError, PermissionError) as e: handle_unity_execution_error(e, op_name); update_status(f"[Error] {op_name.capitalize()} fail (File/Perm).")
@@ -665,7 +1240,7 @@ def build_simulation_task(extra_args, callback):
 
 def build_simulation_threaded(callback=None):
     target, _ = get_build_target_and_executable(SIMULATION_PROJECT_PATH)
-    if not target: print("Error: Cound not determine build target"); update_status("Error: Build target unknown."); return
+    if not target: print("Error: Could not determine build target"); update_status("Error: Build target unknown."); return
     threading.Thread(target=lambda: build_simulation_task(["-buildTarget", target], callback), daemon=True).start()
 
 def open_simulation_executable():
@@ -695,31 +1270,55 @@ def open_in_unity():
 # API Simulation Creation
 # ======================================================
 def create_simulation_thread(sim_name, sim_desc, original_states):
-    update_status(f"Creating '{sim_name}' via API...");
-    try: os.makedirs(SIMULATIONS_DIR, exist_ok=True)
-    except Exception as e: messagebox.showerror("Critical Error", f"Could not create simulations dir: {e}"); update_status("Critical dir error."); main_window.after(0, enable_all_interactions); return
+    update_status(f"Creating '{sim_name}' via local API function...")
     success = False
+    error_message_detail = f"Unknown error during creation of '{sim_name}'." 
+
     try:
-        api_script = Path("./Scripts/api_manager.py").resolve()
-        if not api_script.exists(): raise FileNotFoundError(f"API script not found: {api_script}")
-        cmd = [sys.executable, str(api_script), sim_name, sim_desc]
-        flags = subprocess.CREATE_NO_WINDOW if platform.system() == "Windows" else 0
-        result = subprocess.run(cmd, check=True, capture_output=True, text=True, timeout=300, creationflags=flags, encoding='utf-8', errors='ignore')
-        update_status(f"'{sim_name}' created successfully."); main_window.after(0, lambda: messagebox.showinfo("Success", f"Simulation '{sim_name}' created successfully via API.\n\nOutput:\n{result.stdout[:500]}..."))
-        global all_simulations_data; all_simulations_data = get_simulations()
-        main_window.after(50, populate_simulations); success = True
-    except FileNotFoundError as e: main_window.after(0, lambda: messagebox.showerror("Critical Error", f"Required API script not found:\n{e}")); update_status("Error: Missing API script.")
-    except subprocess.CalledProcessError as e:
-        err_out = e.stderr if e.stderr else e.stdout; code=e.returncode; msg = f"API Script Error (Code: {code})"; details = f"Error creating simulation '{sim_name}'.\n\nReturn Code: {code}\n\nOutput/Error:\n{err_out}";
-        print(f"--- API Script Error Output (Code {code}) ---\n{err_out}\n--- End API Script Error Output ---")
-        main_window.after(0, lambda m=msg, d=details: messagebox.showerror(m, d))
-        update_status(f"Error: API script failed (Code {code}). Check console.")
-    except subprocess.TimeoutExpired: main_window.after(0, lambda: messagebox.showerror("Error", "Simulation creation via API timed out.")); update_status("Error: API creation timeout.")
-    except Exception as e: main_window.after(0, lambda: messagebox.showerror("Unexpected Error", f"CRITICAL ERROR during API creation:\n{type(e).__name__}: {e}")); update_status("Critical API creation error."); print(f"Err create_sim_thread: {e}"); import traceback; traceback.print_exc()
-    finally: main_window.after(100, enable_all_interactions)
+        try:
+            os.makedirs(SIMULATIONS_DIR, exist_ok=True)
+        except Exception as e:
+            error_message_detail = f"Could not create simulations directory: {SIMULATIONS_DIR}\n{type(e).__name__}: {e}"
+            success = False
+            main_window.after(0, lambda msg=error_message_detail: messagebox.showerror("Critical Setup Error", msg))
+            update_status("Critical directory creation error.")
+            return
+
+        success, error_message = api_manager(sim_name, sim_desc, use_cache=True)
+
+        if success:
+            update_status(f"'{sim_name}' creation process completed successfully.")
+            main_window.after(0, lambda: messagebox.showinfo("Success", f"Simulation '{sim_name}' created successfully."))
+            global all_simulations_data
+            all_simulations_data = get_simulations()
+            main_window.after(50, populate_simulations)
+
+        else:
+            error_message_detail = error_message if error_message else f"Failed to create simulation '{sim_name}'. Reason unknown (check logs)."
+            update_status(f"Error creating '{sim_name}'. Check logs.")
+            main_window.after(0, lambda msg=error_message_detail: messagebox.showerror("Simulation Creation Failed", msg))
+
+    except Exception as e:
+        error_type = type(e).__name__
+        error_msg = str(e)
+        detailed_error = traceback.format_exc()
+
+        error_message_detail = f"A critical unexpected error occurred during simulation creation:\n{error_type}: {error_msg}\n\nCheck logs for trace."
+        main_window.after(0, lambda msg=error_message_detail: messagebox.showerror("Unexpected Creation Error", msg))
+        update_status(f"Critical error during creation: {error_type}")
+        print(f"--- CRITICAL ERROR in create_simulation_thread ---")
+        print(detailed_error)
+        print(f"--- End Critical Error ---")
+        success = False
+
+    finally:
+        main_window.after(100, enable_all_interactions)
+        print(f"Simulation creation thread for '{sim_name}' finished. Success: {success}")
+        if not success:
+            print(f"Failure reason: {error_message_detail}")
 
 # ======================================================
-# Verification Logic (OpenAI v0.x/v1.x compatible)
+# Verification Logic
 # ======================================================
 def perform_verification(show_results_box=False, on_startup=False):
     global unity_path_ok, unity_version_ok, unity_projects_path_ok, apis_key_ok, apis_models_ok, initial_verification_complete
@@ -734,7 +1333,7 @@ def perform_verification(show_results_box=False, on_startup=False):
     results = []; unity_path_ok=unity_version_ok=unity_projects_path_ok=apis_key_ok=apis_models_ok=False
     req_ver = UNITY_REQUIRED_VERSION_STRING
 
-    # --- Verify Unity Executable and Version ---
+    # Verify Unity Executable and Version
     if not UNITY_EXECUTABLE: results.append("❌ Unity Exe: Path missing in .env file.")
     elif not os.path.isfile(UNITY_EXECUTABLE): results.append(f"❌ Unity Exe: Path invalid or not found:\n   '{UNITY_EXECUTABLE}'")
     else:
@@ -751,7 +1350,7 @@ def perform_verification(show_results_box=False, on_startup=False):
                 results.append(f"❌ Unity Ver: Path NOT end with '{expected_suffix}'.\n   Found: '...{os.path.sep}{os.path.basename(parent_dir)}{os.path.sep}{os.path.basename(normalized_exe_path)}'")
         except Exception as path_err: results.append(f"⚠️ Unity Ver: Path check error: {path_err}")
 
-    # --- Verify Unity Projects Path ---
+    # Verify Unity Projects Path
     if not UNITY_PROJECTS_PATH: results.append("❌ Projects Path: Missing in .env file.")
     elif not os.path.isdir(UNITY_PROJECTS_PATH): results.append(f"❌ Projects Path: Invalid or not a directory:\n   '{UNITY_PROJECTS_PATH}'")
     else:
@@ -762,41 +1361,22 @@ def perform_verification(show_results_box=False, on_startup=False):
         SIMULATION_LOADED_FILE = os.path.join(STREAMING_ASSETS_FOLDER, "simulation_loaded.txt")
         last_simulation_loaded = read_last_loaded_simulation_name()
 
-    # --- Verify OpenAI API Key and Models (v0.x / v1.x compatible) ---
-    apis_key_ok = False; apis_models_ok = False # Reset
+    # Verify OpenAI API Key and Models
+    apis_key_ok = False; apis_models_ok = False
     if not OPENAI_API_KEY: results.append("❌ API Key: Missing in .env file.")
     else:
         try:
-            # --- Determine OpenAI version and call appropriate methods ---
-            if OPENAI_V1_CLIENT_EXISTS:
-                # --- Logic for openai >= 1.0 ---
-                print("DEBUG: Verifying API using OpenAI v1.x+ client")
-                client = openai.OpenAI(api_key=OPENAI_API_KEY)
-                client.models.list(limit=1) # Test connection/auth
-                apis_key_ok = True
-                results.append("✅ API Key: Connection successful (v1.x+).")
-                list_models_func = lambda: client.models.list() # Use client method
-                retrieve_model_func = lambda model_id: client.models.retrieve(model_id)
-                # Define v1 exception types (already imported)
-                AuthErrType = AuthenticationError
-                InvalidReqErrType = InvalidRequestError
-                ConnErrType = APIConnectionError
-            else:
-                # --- Logic for openai < 1.0 ---
-                print("DEBUG: Verifying API using OpenAI v0.x client")
-                openai.api_key = OPENAI_API_KEY
-                openai.Model.list(limit=1) # Test connection/auth
-                apis_key_ok = True
-                results.append("✅ API Key: Connection successful (v0.x).")
-                list_models_func = lambda: openai.Model.list() # Use class method
-                retrieve_model_func = lambda model_id: openai.Model.retrieve(model_id)
-                 # Define v0 exception types (using imported or placeholder)
-                AuthErrType = AuthenticationError_v0
-                InvalidReqErrType = InvalidRequestError_v0
-                ConnErrType = APIConnectionError_v0
-            # --- End Version Specific Setup ---
+            openai.api_key = OPENAI_API_KEY
+            openai.Model.list(limit=1)
+            apis_key_ok = True
+            results.append("✅ API Key: Connection successful (v0.x).")
+            list_models_func = lambda: openai.Model.list()
+            retrieve_model_func = lambda model_id: openai.Model.retrieve(model_id)
+            AuthErrType = AuthenticationError_v0
+            InvalidReqErrType = InvalidRequestError_v0
+            ConnErrType = APIConnectionError_v0
 
-            # --- Common Model Verification Logic ---
+            # Common Model Verification Logic
             if apis_key_ok:
                 models_ok_list = []
                 primary_model_checked = False
@@ -812,17 +1392,13 @@ def perform_verification(show_results_box=False, on_startup=False):
                         continue
 
                     try:
-                        retrieve_model_func(model_id) # Use the correct function
+                        retrieve_model_func(model_id)
                         results.append(f"✅ {model_name_label}: ID '{model_id}' verified.")
                         if is_primary: models_ok_list.append(True)
-                    except InvalidReqErrType as e: # Catch version-specific InvalidRequest
+                    except InvalidReqErrType as e:
                         results.append(f"❌ {model_name_label}: ID '{model_id}' NOT FOUND or invalid. Error: {e}")
                         if is_primary: models_ok_list.append(False)
-                    # Catch potential InvalidRequest from the *other* version if the detection wasn't perfect
-                    except (InvalidRequestError if OPENAI_V1_CLIENT_EXISTS and not OPENAI_V0_ERROR_IMPORTED else InvalidRequestError_v0) as e_alt:
-                         results.append(f"❌ {model_name_label}: ID '{model_id}' NOT FOUND/invalid (Alt). Error: {e_alt}")
-                         if is_primary: models_ok_list.append(False)
-                    except Exception as model_error: # Other errors
+                    except Exception as model_error:
                         results.append(f"❌ {model_name_label}: Error verifying ID '{model_id}'. Error: {type(model_error).__name__}: {model_error}")
                         if is_primary: models_ok_list.append(False)
 
@@ -836,25 +1412,17 @@ def perform_verification(show_results_box=False, on_startup=False):
         except ConnErrType as conn_err:
              results.append(f"❌ API Connection: Failed to connect. Error: {conn_err}")
              apis_key_ok = False; apis_models_ok = False
-        # Catch potential errors from the *other* version's types
-        except (AuthenticationError if not OPENAI_V1_CLIENT_EXISTS and OPENAI_V0_ERROR_IMPORTED else AuthenticationError_v0) as auth_err_alt:
-            results.append(f"❌ API Key: Invalid or expired (Alt). Error: {auth_err_alt}")
-            apis_key_ok = False; apis_models_ok = False
-        except (APIConnectionError if not OPENAI_V1_CLIENT_EXISTS and OPENAI_V0_ERROR_IMPORTED else APIConnectionError_v0) as conn_err_alt:
-            results.append(f"❌ API Connection: Failed to connect (Alt). Error: {conn_err_alt}")
-            apis_key_ok = False; apis_models_ok = False
-        except Exception as api_err: # Catchall
+        except Exception as api_err:
              results.append(f"❌ API Error: Unexpected error during verification. Error: {type(api_err).__name__}: {api_err}")
              apis_key_ok = False; apis_models_ok = False
              print(f"Unexpected API verification error: {api_err}"); import traceback; traceback.print_exc()
-
 
     if not initial_verification_complete: initial_verification_complete = True
     unity_status = "Unity OK" if unity_path_ok and unity_version_ok and unity_projects_path_ok else "Unity ERR"
     api_status = "API OK" if apis_key_ok and apis_models_ok else "API ERR"
     final_status = f"{unity_status} | {api_status}"
 
-    # --- Update GUI ---
+    # Update GUI
     if 'main_window' in globals() and main_window.winfo_exists():
         main_window.after(0, lambda: update_status(final_status))
         main_window.after(50, update_button_states)
@@ -893,9 +1461,7 @@ def perform_verification(show_results_box=False, on_startup=False):
 def open_config_window():
     cfg_win = ctk.CTkToplevel(main_window)
     cfg_win.title("Settings (.env Configuration)")
-    # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-    apply_icon(cfg_win) # Aplicar icono a la ventana de configuración
-    # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+    apply_icon(cfg_win)
     center_window(cfg_win, 700, 200); cfg_win.resizable(False, False); cfg_win.transient(main_window); cfg_win.grab_set()
     frame = ctk.CTkFrame(cfg_win); frame.pack(fill="both", expand=True, padx=20, pady=20); frame.grid_columnconfigure(1, weight=1)
     entries = {}
@@ -925,14 +1491,13 @@ def open_config_window():
             messagebox.showinfo("Success", "Settings saved. Re-verifying...", parent=cfg_win); cfg_win.destroy()
             main_window.after(100, lambda: perform_verification(show_results_box=True))
         except Exception as e: messagebox.showerror("Save Error", f"Could not write .env file:\n{e}", parent=cfg_win)
-    # Usar colores generales para diálogos
+
     mode_idx = get_color_mode_index()
     save_btn = ctk.CTkButton(btn_frame, text="Save and Verify", command=save_config, font=APP_FONT, fg_color=COLOR_SUCCESS_GENERAL[mode_idx], hover_color=COLOR_INFO_GENERAL[mode_idx]); save_btn.grid(row=0, column=1, padx=10, pady=10)
     cancel_btn = ctk.CTkButton(btn_frame, text="Cancel", command=cfg_win.destroy, font=APP_FONT, fg_color=COLOR_WARNING_GENERAL[mode_idx], hover_color=COLOR_DANGER_GENERAL[mode_idx]); cancel_btn.grid(row=0, column=2, padx=10, pady=10)
 
-
 # ======================================================
-# GUI Definitions Callbacks
+# GUI Definitions & Callbacks
 # ======================================================
 def populate_simulations():
     if not initial_verification_complete: return
@@ -957,7 +1522,7 @@ def filter_simulations(event=None):
         if search_term and search_term not in sim_data['name'].lower(): continue
         is_loaded = (sim_data["name"] == last_simulation_loaded)
         row_tag = "evenrow" if displayed_count % 2 == 0 else "oddrow"
-        item_tags = [row_tag];
+        item_tags = [row_tag]
         if is_loaded: item_tags.append("loaded")
         loaded_sym = loaded_indicator_text if is_loaded else ""
         play_sym = play_icon_text; delete_sym = delete_icon_text
@@ -966,9 +1531,9 @@ def filter_simulations(event=None):
                             values=(sim_data["name"], sim_data["creation"], sim_data["last_opened"], loaded_sym, play_sym, delete_sym),
                             tags=tuple(item_tags))
             displayed_count += 1
-        except tk.TclError as e: print(f"Error inserting '{sim_data['name']}': {e}")
+        except tk.TclError as e: print(f"Error inserting '{sim_data['name']}': {e}") # Should be rare now
 
-    status_msg = status_label.cget("text") # Keep current if not initial load
+    status_msg = status_label.cget("text")
     if initial_verification_complete:
         if search_term: status_msg = f"Displaying {displayed_count} of {len(all_simulations_data)} matching '{search_term}'."
         else: status_msg = f"Displaying {len(all_simulations_data)} simulations."
@@ -1009,7 +1574,7 @@ def update_button_states():
     except (NameError, tk.TclError) as e: print(f"Warning: Could not update button states: {e}")
 
 def on_load_simulation_request(simulation_name):
-    global is_build_running;
+    global is_build_running
     if is_build_running: return
     print(f"Load request: {simulation_name}")
     if not all([unity_path_ok, unity_version_ok, unity_projects_path_ok]): messagebox.showerror("Unity Config Error", "Cannot load: Invalid Unity config."); return
@@ -1050,16 +1615,15 @@ def build_callback(success, simulation_name, executable_path):
         update_status(f"Build '{simulation_name}' finished, but exe not found: {executable_path}")
         messagebox.showerror("Build Error", f"Build for '{simulation_name}' completed, but exe not found:\n{executable_path}\nCheck logs.")
     else: update_status(f"Build process for '{simulation_name}' failed.")
-    # enable_all_interactions called by build_simulation_task after this
 
 def on_delete_simulation_request(simulation_name):
-    global is_build_running;
+    global is_build_running
     if is_build_running: return
     print(f"Delete request: {simulation_name}")
     delete_simulation(simulation_name)
 
 def on_show_graphs_thread():
-    global is_build_running;
+    global is_build_running
     if is_build_running: return
     sel = sim_tree.selection()
     if not sel: messagebox.showwarning("No Selection", "Select simulation to view graphs."); return
@@ -1068,27 +1632,51 @@ def on_show_graphs_thread():
     threading.Thread(target=show_graphs_logic, args=(sim_name,), daemon=True).start()
 
 def show_graphs_logic(sim_name):
+    """
+    Genera y muestra los gráficos para la simulación dada llamando
+    directamente a la función SimulationGraphics definida localmente.
+    """
     try:
         data_dir = Path.home() / "Documents" / "SimulationLoggerData" / sim_name
-        csv_path = data_dir / "SimulationStats.csv"; graphs_dir = data_dir / "Graficos"
-        if not csv_path.exists(): messagebox.showerror("Data Not Found", f"CSV 'SimulationStats.csv' for '{sim_name}' not found:\n{data_dir}"); update_status(f"Error: CSV data missing for '{sim_name}'."); return
+        csv_path = data_dir / "SimulationStats.csv"
+        graphs_dir = data_dir / "Graficos" 
+
+        if not csv_path.exists():
+            messagebox.showerror("Data Not Found",
+                                 f"CSV 'SimulationStats.csv' for simulation '{sim_name}' not found in:\n{data_dir}")
+            update_status(f"Error: CSV data missing for '{sim_name}'.")
+            return
+
         graphs_dir.mkdir(parents=True, exist_ok=True)
-        sim_script = Path(SIMULATIONS_DIR)/sim_name/"Assets"/"Scripts"/"SimulationData"/"SimulationGraphics.py"
-        gen_script = Path("./Scripts/SimulationGraphics.py").resolve()
-        script = str(sim_script) if sim_script.exists() else (str(gen_script) if gen_script.exists() else None)
-        if not script: messagebox.showerror("Script Not Found", "Could not find 'SimulationGraphics.py'"); update_status("Error: Graph script missing."); return
-        update_status(f"Running graph script for '{sim_name}': {os.path.basename(script)}")
-        proc = subprocess.Popen([sys.executable, script, sim_name]); proc.wait(timeout=120);
-        if proc.returncode != 0: messagebox.showwarning("Graph Warning", f"Graph script for '{sim_name}' exit code {proc.returncode}."); update_status(f"Warn: Graph script '{sim_name}' code {proc.returncode}.")
-        else: update_status(f"Graph script for '{sim_name}' completed.")
-        print(f"Opening graphs folder: {graphs_dir}"); open_graphs_folder(sim_name)
-    except FileNotFoundError as e: messagebox.showerror("File Not Found Error", f"File not found:\n{e}"); update_status("Error: File not found for graphs.")
-    except subprocess.TimeoutExpired: messagebox.showerror("Timeout Error", f"Graph script for '{sim_name}' timed out."); update_status(f"Error: Graph script '{sim_name}' timeout.")
-    except Exception as e: messagebox.showerror("Graph Error", f"Error generating graphs for '{sim_name}':\n{e}"); update_status(f"Error graphs for '{sim_name}'."); print(f"Graph exception: {e}"); import traceback; traceback.print_exc()
-    finally: main_window.after(0, enable_all_interactions)
+
+        update_status(f"Generating graphs for '{sim_name}'...")
+        SimulationGraphics(sim_name)
+
+        update_status(f"Graph generation for '{sim_name}' completed.")
+        print(f"Opening graphs folder: {graphs_dir}")
+        open_graphs_folder(sim_name)
+
+    except FileNotFoundError as e:
+        messagebox.showerror("File Not Found Error", f"File not found during graph generation:\n{e}")
+        update_status(f"Error: File not found while generating graphs for '{sim_name}'.")
+        print(f"Graph generation FileNotFoundError: {e}")
+        traceback.print_exc()
+    except Exception as e:
+        messagebox.showerror("Graph Error", f"An error occurred while generating graphs for '{sim_name}':\n{type(e).__name__}: {e}")
+        update_status(f"Error generating graphs for '{sim_name}'.")
+        print(f"Graph generation exception: {e}")
+        traceback.print_exc()
+    finally:
+        if 'main_window' in globals() and hasattr(main_window, 'after'):
+             main_window.after(0, enable_all_interactions)
+        else:
+             try:
+                 enable_all_interactions()
+             except NameError:
+                 print("Advertencia: 'main_window' o 'enable_all_interactions' no definidas correctamente.")
 
 def on_create_simulation():
-    global is_build_running;
+    global is_build_running
     if is_build_running: return
     if not apis_key_ok or not apis_models_ok: messagebox.showerror("API Config Error", "Cannot create: Invalid API Key or primary model."); return
     sim_name = custom_askstring("Create New Simulation", "Enter simulation name:");
@@ -1105,24 +1693,22 @@ def on_create_simulation():
 def show_options_window(simulation_name, executable_path):
     opt_win = ctk.CTkToplevel(main_window)
     opt_win.title(f"Options for '{simulation_name}'")
-    # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-    apply_icon(opt_win) # Aplicar icono a la ventana de opciones
-    # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+    apply_icon(opt_win)
     center_window(opt_win, 380, 200); opt_win.resizable(False, False); opt_win.transient(main_window); opt_win.grab_set()
     frame = ctk.CTkFrame(opt_win); frame.pack(expand=True, fill="both", padx=20, pady=20)
     ctk.CTkLabel(frame, text=f"Simulation '{simulation_name}' is loaded.", font=APP_FONT_BOLD).pack(pady=(0, 15))
     exec_ok = executable_path and os.path.exists(executable_path); run_state = "normal" if exec_ok else "disabled"
     def run_close(): open_simulation_executable(); opt_win.destroy()
     def open_unity_close(): open_in_unity(); opt_win.destroy()
-    # Usar colores generales para diálogos
+
     mode_idx = get_color_mode_index()
     run_btn = ctk.CTkButton(frame, text="Run Simulation", command=run_close, state=run_state, font=APP_FONT, height=40, fg_color=COLOR_SUCCESS_GENERAL[mode_idx], hover_color=COLOR_INFO_GENERAL[mode_idx]); run_btn.pack(pady=8, fill="x", padx=10)
     if not exec_ok: ctk.CTkLabel(frame, text="Executable not found.", text_color="gray", font=("Segoe UI", 9)).pack(pady=(0, 5))
-    open_btn = ctk.CTkButton(frame, text="Open Project in Unity Editor", command=open_unity_close, font=APP_FONT, height=40, fg_color=COLOR_INFO_GENERAL[mode_idx], hover_color=COLOR_SUCCESS_GENERAL[mode_idx]); open_btn.pack(pady=8, fill="x", padx=10)
+    open_btn = ctk.CTkButton(frame, text="Open Project in Unity Editor", command=open_unity_close, font=APP_FONT, height=40, fg_color="#1E88E5", hover_color="#42A5F5"); open_btn.pack(pady=8, fill="x", padx=10)
     update_status(f"Options available for loaded sim '{simulation_name}'."); opt_win.wait_window()
 
 def handle_tree_click(event):
-    global is_build_running;
+    global is_build_running
     if is_build_running: return
     region = sim_tree.identify_region(event.x, event.y)
     if region == "cell":
@@ -1138,11 +1724,11 @@ def handle_tree_click(event):
                 elif col_name_id == "col_delete": print(f"Action click: Delete '{sim_name}'"); on_delete_simulation_request(sim_name)
             else: cancel_tooltip(sim_tree)
         except Exception as e: print(f"Error Treeview click: {e}"); cancel_tooltip(sim_tree)
-    elif region == "heading": pass
+    elif region == "heading": pass 
     else: cancel_tooltip(sim_tree)
 
 def handle_tree_motion(event):
-    global is_build_running;
+    global is_build_running
     if is_build_running: return
     region = sim_tree.identify_region(event.x, event.y)
     if region != "cell": cancel_tooltip(sim_tree); return
@@ -1171,29 +1757,29 @@ def load_logo(path, target_width):
     except FileNotFoundError: print(f"Warn: Logo not found '{path}'"); return None
     except Exception as e: print(f"Error loading logo: {e}"); return None
 
-# --- Funciones para el Tema ---
 def update_treeview_style():
     if 'sim_tree' not in globals() or 'main_window' not in globals() or not main_window.winfo_exists(): return
     mode_idx = get_color_mode_index(); mode_str = "Dark" if mode_idx == 1 else "Light"
     print(f"Updating Treeview style for {mode_str} mode...")
     try:
+        # Get colors from the CustomTkinter theme manager
         bg = main_window._apply_appearance_mode(ctk.ThemeManager.theme["CTkFrame"]["fg_color"])
         fg = main_window._apply_appearance_mode(ctk.ThemeManager.theme["CTkLabel"]["text_color"])
         sel_bg = main_window._apply_appearance_mode(ctk.ThemeManager.theme["CTkButton"]["fg_color"])
-        head_bg = main_window._apply_appearance_mode(ctk.ThemeManager.theme["CTkButton"]["fg_color"]) # Similar a botón
+        head_bg = main_window._apply_appearance_mode(ctk.ThemeManager.theme["CTkButton"]["fg_color"])
         head_fg = main_window._apply_appearance_mode(ctk.ThemeManager.theme["CTkButton"]["text_color"])
         odd = "#FDFDFD" if mode_str == "Light" else "#3A3A3A"
         even = "#F7F7F7" if mode_str == "Light" else "#343434"
-        loaded_bg = "#D5F5D5" if mode_str == "Light" else "#284B28"
-        loaded_fg = fg # Usar color texto normal
+        loaded_bg = "#D5F5D5" if mode_str == "Light" else "#284B28" # Light green / Dark green
+        loaded_fg = fg
     except Exception as e:
         print(f"Error getting theme colors: {e}. Using fallback."); bg="#2B2B2B" if mode_str=="Dark" else "#DBDBDB"; fg="white" if mode_str=="Dark" else "black"; sel_bg="#565B5E" if mode_str=="Dark" else "#3470E7"; head_bg="#4A4D50" if mode_str=="Dark" else "#A5A9AC"; head_fg="white" if mode_str=="Dark" else "black"; odd="#3A3A3A" if mode_str=="Dark" else "#EFEFEF"; even="#343434" if mode_str=="Dark" else "#F7F7F7"; loaded_bg="#284B28" if mode_str=="Dark" else "#D5F5D5"; loaded_fg=fg
 
-    style = ttk.Style();
+    style = ttk.Style()
     try: style.theme_use("clam")
     except tk.TclError: print("Warn: 'clam' theme not available.")
     style.configure("Treeview", background=bg, foreground=fg, fieldbackground=bg, rowheight=28, font=TREEVIEW_FONT)
-    style.configure("Treeview.Heading", font=TREEVIEW_HEADER_FONT, background=head_bg, foreground="#c0c3c0", relief="flat", padding=(10, 5)) # Head foreground negro forzoso
+    style.configure("Treeview.Heading", font=TREEVIEW_HEADER_FONT, background=head_bg, foreground=head_fg, relief="flat", padding=(10, 5))
     style.map("Treeview.Heading", relief=[('active','groove'), ('!active', 'flat')])
     style.map('Treeview', background=[('selected', sel_bg)], foreground=[('selected', head_fg)])
     sim_tree.tag_configure('oddrow', background=odd, foreground=fg)
@@ -1202,40 +1788,37 @@ def update_treeview_style():
     print("Treeview style updated.")
 
 def toggle_appearance_mode():
-    """Cambia tema y actualiza estilos y colores de botones."""
     current_mode = ctk.get_appearance_mode(); new_mode = "Dark" if current_mode == "Light" else "Light"
     print(f"Switching appearance mode to: {new_mode}")
     ctk.set_appearance_mode(new_mode)
     if 'theme_switch' in globals(): theme_switch.configure(text=f"{new_mode} Mode")
 
-    # Actualizar estilo Treeview (esencial)
     main_window.after(50, update_treeview_style)
 
-    # --- Actualizar Colores de Botones Personalizados ---
+    # Update Custom Button Colors
     mode_idx = get_color_mode_index()
     try:
-        # Logo
+        # Update Logo
         logo_photo = load_logo(LOGO_PATHS[mode_idx], LOGO_WIDTH)
-        # Unpack logo y luego pack logo
         if logo_photo and 'sidebar_frame' in globals() and sidebar_frame.winfo_exists():
-             logo_label = sidebar_frame.winfo_children()[0] # Asume que el logo es el primer widget
+             logo_label = sidebar_frame.winfo_children()[0]
              if isinstance(logo_label, ctk.CTkLabel):
                  logo_label.configure(image=logo_photo)
-                 logo_label.image = logo_photo # Guardar referencia
+                 logo_label.image = logo_photo
 
-        # Sidebar Buttons
+        # Update Sidebar Buttons
         settings_btn.configure(fg_color=BTN_SETTINGS_FG_COLOR[mode_idx], hover_color=BTN_SETTINGS_HOVER_COLOR[mode_idx], text_color=BTN_SETTINGS_TEXT_COLOR[mode_idx])
         verify_btn.configure(fg_color=BTN_VERIFY_FG_COLOR[mode_idx], hover_color=BTN_VERIFY_HOVER_COLOR[mode_idx], text_color=BTN_VERIFY_TEXT_COLOR[mode_idx])
         unity_down_btn.configure(fg_color=BTN_UNITY_DOWN_FG_COLOR[mode_idx], hover_color=BTN_UNITY_DOWN_HOVER_COLOR[mode_idx], text_color=BTN_UNITY_DOWN_TEXT_COLOR[mode_idx])
         about_btn.configure(fg_color=BTN_ABOUT_FG_COLOR[mode_idx], hover_color=BTN_ABOUT_HOVER_COLOR[mode_idx], text_color=BTN_ABOUT_TEXT_COLOR[mode_idx])
         exit_btn.configure(fg_color=BTN_EXIT_FG_COLOR[mode_idx], hover_color=BTN_EXIT_HOVER_COLOR[mode_idx], text_color=BTN_EXIT_TEXT_COLOR[mode_idx])
 
-        # Bottom Buttons
+        # Update Bottom Buttons
         reload_btn.configure(fg_color=BTN_RELOAD_FG_COLOR[mode_idx], hover_color=BTN_RELOAD_HOVER_COLOR[mode_idx], text_color=BTN_RELOAD_TEXT_COLOR[mode_idx])
         graph_btn.configure(fg_color=BTN_GRAPH_FG_COLOR[mode_idx], hover_color=BTN_GRAPH_HOVER_COLOR[mode_idx], text_color=BTN_GRAPH_TEXT_COLOR[mode_idx])
         create_btn.configure(fg_color=BTN_CREATE_FG_COLOR[mode_idx], hover_color=BTN_CREATE_HOVER_COLOR[mode_idx], text_color=BTN_CREATE_TEXT_COLOR[mode_idx])
 
-        # Search Button
+        # Update Search Button
         clear_search_btn.configure(fg_color=BTN_CLEARSEARCH_FG_COLOR[mode_idx], hover_color=BTN_CLEARSEARCH_HOVER_COLOR[mode_idx], text_color=BTN_CLEARSEARCH_TEXT_COLOR[mode_idx])
 
         print("Button colors updated for theme.")
@@ -1247,23 +1830,21 @@ def toggle_appearance_mode():
 # GUI Setup
 # ======================================================
 main_window = ctk.CTk()
-# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-apply_icon(main_window) # Aplicar icono a la ventana principal
-# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+apply_icon(main_window)
 main_window.title("Unity Simulation Manager v1.0")
 initial_width=1050; initial_height=700; center_window(main_window, initial_width, initial_height)
 main_window.resizable(True, True); main_window.minsize(850, 550)
 
-# --- Layout ---
+# Layout
 main_window.columnconfigure(0, weight=0); main_window.columnconfigure(1, weight=1)
 main_window.rowconfigure(0, weight=1); main_window.rowconfigure(1, weight=0)
 
-# --- Sidebar ---
+# Sidebar
 sidebar_width=200; sidebar_frame = ctk.CTkFrame(main_window, width=sidebar_width, corner_radius=5, fg_color=COLOR_SIDEBAR_BG)
 sidebar_frame.grid(row=0, column=0, sticky="nsew", padx=(10, 5), pady=10); sidebar_frame.grid_propagate(False); sidebar_frame.columnconfigure(0, weight=1)
 
-# Determinar modo inicial para cargar logo y colores iniciales
-mode_idx = get_color_mode_index() # Get initial mode index
+# Initial mode for logo and colors
+mode_idx = get_color_mode_index()
 initial_mode = ctk.get_appearance_mode()
 
 logo_photo = load_logo(LOGO_PATHS[mode_idx], LOGO_WIDTH)
@@ -1271,7 +1852,7 @@ if logo_photo: ctk.CTkLabel(sidebar_frame, image=logo_photo, text="").pack(pady=
 else: ctk.CTkLabel(sidebar_frame, text="[Logo]", font=(APP_FONT[0], 14, "italic")).pack(pady=(20, 10), padx=10)
 ctk.CTkLabel(sidebar_frame, text="Menu", font=(APP_FONT[0], 16, "bold")).pack(pady=(5, 15), padx=10)
 
-# Sidebar Buttons (CON COLORES INDIVIDUALES)
+# Sidebar Buttons
 settings_btn = ctk.CTkButton(sidebar_frame, text="Settings (.env)", command=open_config_window, font=APP_FONT,
                              fg_color=BTN_SETTINGS_FG_COLOR[mode_idx],
                              hover_color=BTN_SETTINGS_HOVER_COLOR[mode_idx],
@@ -1302,13 +1883,13 @@ theme_switch = ctk.CTkSwitch(sidebar_frame, text=f"{initial_mode} Mode", command
 if initial_mode == "Dark": theme_switch.select()
 else: theme_switch.deselect()
 
-exit_btn = ctk.CTkButton(sidebar_frame, text="Exit Application", command=main_window.quit, font=APP_FONT,
+exit_btn = ctk.CTkButton(sidebar_frame, text="Exit Application", command=on_closing, font=APP_FONT,
                          fg_color=BTN_EXIT_FG_COLOR[mode_idx],
                          hover_color=BTN_EXIT_HOVER_COLOR[mode_idx],
                          text_color=BTN_EXIT_TEXT_COLOR[mode_idx])
 exit_btn.pack(fill="x", side='bottom', padx=15, pady=(5, 20))
 
-# --- Main Content ---
+# Main Content
 main_content_frame = ctk.CTkFrame(main_window, corner_radius=5); main_content_frame.grid(row=0, column=1, sticky="nsew", padx=(5, 10), pady=10)
 main_content_frame.columnconfigure(0, weight=1); main_content_frame.rowconfigure((0, 1, 3), weight=0); main_content_frame.rowconfigure(2, weight=1) # Treeview expands
 header_frame = ctk.CTkFrame(main_content_frame, fg_color="transparent"); header_frame.grid(row=0, column=0, sticky="ew", padx=10, pady=(10, 5)); header_frame.columnconfigure(0, weight=1)
@@ -1322,7 +1903,7 @@ clear_search_btn = ctk.CTkButton(search_frame, text="Clear", width=60, font=APP_
                                 text_color=BTN_CLEARSEARCH_TEXT_COLOR[mode_idx])
 clear_search_btn.grid(row=0, column=2, padx=(5, 5), pady=5)
 
-# --- Treeview ---
+# Treeview
 tree_frame = ctk.CTkFrame(main_content_frame, corner_radius=5); tree_frame.grid(row=2, column=0, sticky="nsew", padx=10, pady=5); tree_frame.columnconfigure(0, weight=1); tree_frame.rowconfigure(0, weight=1)
 columns = ("nombre", "creacion", "ultima", "col_loaded", "col_load", "col_delete")
 sim_tree = ttk.Treeview(tree_frame, columns=columns, show="headings", selectmode="browse")
@@ -1356,15 +1937,16 @@ def sort_column(tree, col, reverse):
 
 for col in columns:
     if col not in ["col_load", "col_delete", "col_loaded"]:
-        txt = sim_tree.heading(col)['text'].replace(' ▲','').replace(' ▼','')
-        sim_tree.heading(col, text=txt, command=lambda c=col: sort_column(sim_tree, c, False), anchor='w' if col=='nombre' else 'center')
+        txt = sim_tree.heading(col)['text'].replace(' ▲','').replace(' ▼','') # Clean text first
+        anchor = 'w' if col=='nombre' else 'center'
+        sim_tree.heading(col, text=txt, command=lambda c=col: sort_column(sim_tree, c, False), anchor=anchor)
 
 sim_tree.grid(row=0, column=0, sticky="nsew"); scrollbar = ctk.CTkScrollbar(tree_frame, command=sim_tree.yview); scrollbar.grid(row=0, column=1, sticky="ns"); sim_tree.configure(yscrollcommand=scrollbar.set)
 sim_tree.bind('<<TreeviewSelect>>', lambda e: update_button_states()); sim_tree.bind("<Button-1>", handle_tree_click); sim_tree.bind("<Motion>", handle_tree_motion); sim_tree.bind("<Leave>", handle_tree_leave)
 
-# --- Bottom Buttons ---
+# Bottom Buttons
 button_frame_bottom = ctk.CTkFrame(main_content_frame, fg_color="transparent"); button_frame_bottom.grid(row=3, column=0, pady=(10, 10), padx=10, sticky="ew")
-button_frame_bottom.columnconfigure((0, 4), weight=1); button_frame_bottom.columnconfigure((1, 2, 3), weight=0)
+button_frame_bottom.columnconfigure((0, 4), weight=1); button_frame_bottom.columnconfigure((1, 2, 3), weight=0) # Center buttons
 button_height=35
 
 reload_btn = ctk.CTkButton(button_frame_bottom, text="Reload List", command=populate_simulations, font=APP_FONT, height=button_height,
@@ -1385,7 +1967,7 @@ create_btn = ctk.CTkButton(button_frame_bottom, text="Create Sim (API)", command
                            text_color=BTN_CREATE_TEXT_COLOR[mode_idx])
 create_btn.grid(row=0, column=3, padx=10, pady=5)
 
-# --- Status Bar ---
+# Status Bar
 status_frame = ctk.CTkFrame(main_window, height=25, corner_radius=0); status_frame.grid(row=1, column=0, columnspan=2, sticky="ew", padx=0, pady=0)
 status_label = ctk.CTkLabel(status_frame, text="Initializing...", anchor="w", font=STATUS_FONT); status_label.pack(side="left", fill="x", expand=True, padx=10, pady=3)
 
@@ -1393,40 +1975,10 @@ status_label = ctk.CTkLabel(status_frame, text="Initializing...", anchor="w", fo
 # App Initialization
 # ======================================================
 if __name__ == "__main__":
-    main_window.after(10, update_treeview_style) # Apply initial style
+    main_window.after(10, update_treeview_style)
     update_button_states()
     update_status("Performing initial configuration verification...")
     threading.Thread(target=perform_verification, args=(False, True), daemon=True).start()
-    def on_closing():
-        """Se llama cuando el usuario intenta cerrar la ventana."""
-        global is_build_running
-        if is_build_running:
-            messagebox.showwarning("Operación en Progreso", "Por favor, espere a que la operación actual (build/load) finalice antes de cerrar la aplicación.")
-            return # Prevenir cierre
 
-        # --- FIX: Corregir llamada a askokcancel ---
-        # El primer argumento es 'title', el segundo es 'message'.
-        # No se debe pasar 'title' como keyword si ya se pasó posicionalmente.
-        if messagebox.askokcancel(
-            title="Confirmar Salida", # Argumento posicional 1: Título
-            message="¿Está seguro de que desea salir de Unity Simulation Manager?", # Argumento posicional 2: Mensaje
-            icon='question' # Argumento keyword para opciones
-            # , title="Confirm Exit" # <-- ESTE ERA EL ERROR, TÍTULO DUPLICADO
-            ):
-            update_status("Cerrando aplicación...")
-            print("Intentando cerrar instancias de Unity asociadas (si existen)...")
-            # Intentar cerrar Unity en segundo plano para no retrasar mucho el cierre de la GUI
-            close_unity_thread = threading.Thread(target=ensure_unity_closed, daemon=True)
-            close_unity_thread.start()
-            # Esperar un poquito para que el mensaje de cierre se vea y el hilo empiece
-            # y luego destruir la ventana principal, lo que termina el mainloop.
-            print("Cerrando GUI...")
-            main_window.after(200, main_window.destroy)
-        # else: # Usuario hizo clic en Cancelar
-        #     print("Cierre cancelado por el usuario.")
-
-    # Asignar la función on_closing al protocolo WM_DELETE_WINDOW
     main_window.protocol("WM_DELETE_WINDOW", on_closing)
-
-    # Iniciar el bucle principal de la aplicación
     main_window.mainloop()

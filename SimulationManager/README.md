@@ -6,4 +6,6 @@ Ejecutar main.py
 
 
 Build app:
-pyinstaller --name SimulationManager --onefile --windowed --icon=icono.ico --add-data ".env;." --add-data "icono.ico;." --add-data "img;img" --add-data "Responses;Responses" --add-data "Scripts;Scripts" --add-data "Simulations;Simulations" --add-data "Template;Template" main.py
+pyinstaller --onefile --windowed --name SimulationManager --icon="img/icono.ico" --add-data "C:\Codes\UnityProjects\SimulationManager\venv\lib\site-packages\tiktoken_ext;tiktoken_ext" --hidden-import "tiktoken.load" main.py
+
+Luego mover '.env' 'img' 'Responses' 'Simulations' y 'Template' a la carpeta /dist que dentro tiene SimulationManager.exe
