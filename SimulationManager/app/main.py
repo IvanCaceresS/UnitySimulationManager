@@ -613,67 +613,119 @@ def import_codes(codes: dict, simulation_name: str) -> bool:
         return False
 
 DELIMITER = "%|%"
-RESPONSES_CSV = os.path.join(".", "Responses", "Responses.csv")
 
-def get_next_id(csv_path: str) -> int:
-    if not os.path.exists(csv_path):
+try:
+    # Crear una carpeta específica para tu aplicación dentro de Documentos
+    APP_DATA_DIR = Path.home() / "Documents" / "UnitySimulationManagerData"
+    APP_DATA_DIR.mkdir(parents=True, exist_ok=True) # Crea la carpeta si no existe
+    RESPONSES_DIR = APP_DATA_DIR / "Responses"
+    RESPONSES_CSV = RESPONSES_DIR / "Responses.csv"
+    print(f"INFO: Usando ruta de datos: {RESPONSES_CSV}") # Bueno para depurar
+except Exception as e:
+    print(f"ERROR CRÍTICO: No se pudo determinar o crear la ruta de datos del usuario: {e}")
+    # Aquí podrías mostrar un error al usuario y salir, o intentar un fallback
+    # Fallback (menos ideal): Intentar escribir junto al script/exe
+    try:
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+    except NameError:
+        script_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
+    RESPONSES_DIR = os.path.join(script_dir, "Responses")
+    RESPONSES_CSV = os.path.join(RESPONSES_DIR, "Responses.csv")
+    print(f"WARNING: Fallback a ruta junto al script/exe: {RESPONSES_CSV}")
+
+def check_last_char_is_newline(filepath: Union[str, Path]) -> bool: # Acepta Path
+    filepath = Path(filepath) # Asegurar que sea Path
+    if not filepath.exists() or filepath.stat().st_size == 0:
+        return True
+    try:
+        with open(filepath, 'rb') as f:
+            f.seek(-1, os.SEEK_END)
+            last_byte = f.read(1)
+            return last_byte == b'\n'
+    except Exception as e:
+        print(f"Advertencia al verificar último carácter de {filepath}: {e}")
+        return False
+
+def get_next_id(csv_path: Union[str, Path]) -> int: # Acepta Path
+    csv_path = Path(csv_path) # Asegurar que sea Path
+    try:
+        # Asegurar que el directorio exista ANTES de intentar leer/escribir
+        csv_path.parent.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        print(f"Error creando directorio para {csv_path}: {e}")
+        raise
+
+    if not csv_path.exists():
         return 1
+
     last_id = 0
     try:
         with open(csv_path, "r", encoding="utf-8") as f:
             lines = f.readlines()
-            if len(lines) < 2:
-                return 1
-            for line in reversed(lines):
-                line = line.strip()
-                if line:
-                    try:
-                        parts = line.split(DELIMITER)
-                        last_id = int(parts[0])
-                        return last_id + 1
-                    except (IndexError, ValueError):
-                        print(f"Advertencia: Ignorando línea mal formada en CSV: {line}")
-                        continue
+        if len(lines) <= 1:
             return 1
+        for line in reversed(lines):
+            line = line.strip()
+            if line:
+                try:
+                    parts = line.split(DELIMITER)
+                    if parts and parts[0].strip().isdigit():
+                        last_id = int(parts[0].strip())
+                        return last_id + 1
+                except (IndexError, ValueError):
+                    continue
+        return 1
     except FileNotFoundError:
          return 1
     except Exception as e:
-         print(f"Error leyendo CSV para obtener el siguiente ID: {e}. Iniciando desde ID 1.")
+         print(f"Error leyendo CSV {csv_path} para obtener ID: {e}. Iniciando desde ID 1.")
          return 1
 
 def write_response_to_csv(pregunta: str, respuesta: str, input_tokens: int, output_tokens: int) -> None:
-    responses_folder = os.path.join(".", "Responses")
-    os.makedirs(responses_folder, exist_ok=True)
-    write_header = not os.path.exists(RESPONSES_CSV) or os.path.getsize(RESPONSES_CSV) == 0
-    next_id = get_next_id(RESPONSES_CSV)
-
     try:
-        with open(RESPONSES_CSV, "a", encoding="utf-8") as f:
-            if not write_header:
-                 f.seek(0, os.SEEK_END)
-                 if f.tell() > 0:
-                      f.seek(f.tell() - 1, os.SEEK_SET)
-                      last_char = f.read(1)
-                      if last_char != '\n':
-                           f.write('\n')
+        # Asegurar que el directorio exista (definido globalmente ahora)
+        RESPONSES_DIR.mkdir(parents=True, exist_ok=True) # Usa la variable Path global
+
+        # Determinar estado del archivo
+        file_exists = RESPONSES_CSV.exists() # Usa la variable Path global
+        is_empty = file_exists and RESPONSES_CSV.stat().st_size == 0
+        write_header = not file_exists or is_empty
+
+        # Obtener ID (también crea directorio si es necesario)
+        next_id = get_next_id(RESPONSES_CSV)
+
+        # Verificar newline
+        needs_leading_newline = file_exists and not is_empty and not check_last_char_is_newline(RESPONSES_CSV)
+
+        # Abrir y escribir
+        with open(RESPONSES_CSV, "a", encoding="utf-8", newline='') as f:
+            if needs_leading_newline:
+                f.write('\n')
             if write_header:
-                f.write(f"id{DELIMITER}pregunta{DELIMITER}respuesta{DELIMITER}input_tokens{DELIMITER}output_tokens\n")
+                header = f"id{DELIMITER}pregunta{DELIMITER}respuesta{DELIMITER}input_tokens{DELIMITER}output_tokens\n"
+                f.write(header)
+
             clean_pregunta = str(pregunta).replace(DELIMITER, "<DELIM>").replace('\n', '\\n').replace('\r', '')
             clean_respuesta = str(respuesta).replace(DELIMITER, "<DELIM>").replace('\n', '\\n').replace('\r', '')
             line = f"{next_id}{DELIMITER}{clean_pregunta}{DELIMITER}{clean_respuesta}{DELIMITER}{input_tokens}{DELIMITER}{output_tokens}\n"
             f.write(line)
-        print(f"Respuesta guardada en: {RESPONSES_CSV} (id: {next_id})")
+
+        print(f"Respuesta guardada en: {RESPONSES_CSV} (id: {next_id})") # Muestra la ruta completa
+
     except IOError as e:
-        print(f"Error de E/S al escribir en {RESPONSES_CSV}: {e}")
+        print(f"Error Crítico de E/S al escribir en {RESPONSES_CSV}: {e}")
+        print("Verifique permisos en la carpeta de Documentos o si el archivo está bloqueado.")
+        # Considera mostrar un messagebox aquí si estás en la GUI
     except Exception as e:
         print(f"Error inesperado al escribir en CSV: {e}")
+        traceback.print_exc()
 
 def get_cached_response(pregunta: str) -> Union[str, None]:
-    if not os.path.exists(RESPONSES_CSV):
+    if not RESPONSES_CSV.exists(): # Usa la variable Path global
         return None
     try:
         with open(RESPONSES_CSV, "r", encoding="utf-8") as f:
-            lines = f.readlines()
+             lines = f.readlines()
         clean_pregunta_search = str(pregunta).replace(DELIMITER, "<DELIM>").replace('\n', '\\n').replace('\r', '')
         for line in lines[1:]:
             line = line.strip()
@@ -714,8 +766,8 @@ def api_manager(simulation_name: str, simulation_description: str, use_cache: bo
         error_msg = "Invalid Content: The description must exclusively refer to E.Coli and/or S.Cerevisiae and their parameters."
         print("Error: " + error_msg)
         return False, error_msg
-    elif formatted_pregunta_strip == "ERROR DE CANTIDAD EXCEDIDA":
-        error_msg = "Exceeded Organism Limit: The maximum number of organisms (3) was exceeded."
+    elif formatted_pregunta_strip == "ERROR CANTIDAD EXCEDIDA":
+        error_msg = "Exceeded Organism Limit: The maximum number of organisms (2) was exceeded."
         print("Error: " + error_msg)
         return False, error_msg
     elif "ERROR" in formatted_pregunta_strip.upper(): # Captura otros posibles errores
