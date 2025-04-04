@@ -7,39 +7,36 @@ using System.Linq;
 
 public class Left_GUI : MonoBehaviour
 {
-    // Parámetros de la interfaz
-    private const int GUIFontSize = 10;
-    private const int GUIWidth = 300;
-    private const int GUIHeight = 30;
+    // --- Parámetros de la interfaz ajustados ---
+    private const int GUIFontSize = 20;
+    private const int GUIWidth = 400;
+    private const int GUIHeight = 24;
+    // --- Fin de ajustes ---
+
     private const int GUIXPosition = 10;
     private const int GUIYPosition = 0;
-    private readonly Rect sliderRect = new Rect(GUIXPosition, GUIYPosition, GUIWidth, GUIHeight);
 
     // Variables de tiempo y FPS
     private float simulationStartTime = 0f;
-    private float accumulatedRealTime = 0f; // Se incrementa solo cuando la simulación está en ejecución (no pausada)
+    private float accumulatedRealTime = 0f;
     public float cachedRealTime = 0f;
     public float cachedSimulatedTime = 0f;
     public float cachedFPS = 0f;
     public int cachedFrameCount = 0;
-    private bool hasStartedSimulation = false; // Se activa al presionar "Start Simulation"
+    private bool hasStartedSimulation = false;
 
-    // Intervalo para actualizar el conteo de entidades (en segundos)
+    // Intervalo para actualizar el conteo de entidades
     private const float entityCountUpdateInterval = 2.0f;
     private float lastEntityCountUpdateTime = 0f;
 
-    // Conteo de entidades y tipos (cache de reflection y queries)
+    // Conteo de entidades y tipos
     public Dictionary<string, int> entityCounts = new Dictionary<string, int>();
     private List<Type> validComponentTypes = new List<Type>();
     private Dictionary<Type, EntityQuery> entityQueries = new Dictionary<Type, EntityQuery>();
 
-    // GUIStyle se inicializará de forma lazy en OnGUI
+    // GUIStyle
     private GUIStyle labelStyle;
 
-    /// <summary>
-    /// Propiedad que devuelve los nombres de los organismos a partir de los tipos válidos.
-    /// Se remueve la parte "Component", se ordenan alfabéticamente y se añade "Cantidad de organismos".
-    /// </summary>
     public IEnumerable<string> OrganismNames
     {
         get
@@ -48,7 +45,7 @@ public class Left_GUI : MonoBehaviour
                 .Select(t => t.Name.Replace("Component", ""))
                 .ToList();
             names.Sort();
-            names.Add("Cantidad de organismos");
+            names.Add("Organism count");
             return names;
         }
     }
@@ -56,98 +53,88 @@ public class Left_GUI : MonoBehaviour
     void Start()
     {
         GameStateManager.OnSetupComplete += EnableGUI;
-        this.enabled = false; // Se activa al completar el setup
+        this.enabled = false;
         CacheValidComponentTypes();
-        ResetCachedValues(); // Inicializa los contadores en 0
+        ResetCachedValues();
     }
 
     void OnDestroy()
     {
         GameStateManager.OnSetupComplete -= EnableGUI;
-        // Opcional: liberar los queries si es necesario:
-        // foreach (var query in entityQueries.Values)
-        // {
-        //     query.Dispose();
-        // }
+        // Dispose queries on destroy
+        foreach(var query in entityQueries.Values)
+        {
+            // Dispose directly, no need to check IsCreated
+            query.Dispose();
+        }
+        entityQueries.Clear();
     }
 
     private void EnableGUI()
     {
-        Debug.Log("Left_GUI: Activando interfaz GUI.");
+        Debug.Log("Left_GUI: Activating GUI interface.");
         this.enabled = true;
         ResetCachedValues();
     }
 
     void Update()
     {
-        // Actualizar siempre el FPS (esto se puede calcular incluso si la simulación está pausada)
-        cachedFPS = 1f / Time.unscaledDeltaTime;
+        if (Time.unscaledDeltaTime > Mathf.Epsilon)
+        {
+            cachedFPS = 1f / Time.unscaledDeltaTime;
+        }
+        else
+        {
+            cachedFPS = 0f;
+        }
 
         if (hasStartedSimulation)
         {
-            // Si la simulación está activa y no está pausada, actualizamos el tiempo real, frames y tiempo simulado
             if (!GameStateManager.IsPaused)
             {
-                // Incrementamos el tiempo acumulado solo si no está pausada
                 accumulatedRealTime += Time.deltaTime;
                 cachedRealTime = accumulatedRealTime;
 
                 cachedFrameCount++;
                 cachedSimulatedTime = cachedFrameCount * GameStateManager.DeltaTime;
 
-                // Actualizar el conteo de entidades cada cierto intervalo para optimizar el rendimiento
                 if (Time.realtimeSinceStartup - lastEntityCountUpdateTime >= entityCountUpdateInterval)
                 {
                     UpdateEntityCounts();
                     lastEntityCountUpdateTime = Time.realtimeSinceStartup;
                 }
             }
-            // Si está pausada, los contadores (real, simulado, frames) permanecen fijos.
         }
         else
         {
-            // Mientras la simulación no ha comenzado, forzamos que los contadores permanezcan en cero
             cachedRealTime = 0f;
             cachedSimulatedTime = 0f;
             cachedFrameCount = 0;
         }
     }
 
-    /// <summary>
-    /// Inicia la simulación, activando el conteo de tiempo y frames.
-    /// </summary>
     public void StartSimulation()
     {
         hasStartedSimulation = true;
         simulationStartTime = Time.realtimeSinceStartup;
-        accumulatedRealTime = 0f; // Reiniciamos el tiempo acumulado
-        ResetCachedValues();
+        accumulatedRealTime = 0f;
+        cachedFrameCount = 0;
+        cachedSimulatedTime = 0f;
+        entityCounts.Clear();
+        lastEntityCountUpdateTime = Time.realtimeSinceStartup;
+        UpdateEntityCounts();
     }
 
-    /// <summary>
-    /// Reinicia la simulación, deteniendo el conteo de tiempo.
-    /// </summary>
     public void ResetSimulation()
     {
         hasStartedSimulation = false;
         ResetCachedValues();
     }
 
-    /// <summary>
-    /// Reinicia los contadores de tiempo, frames y FPS.
-    /// </summary>
     private void ResetCachedValues()
     {
-        if (hasStartedSimulation)
-        {
-            simulationStartTime = Time.realtimeSinceStartup;
-            accumulatedRealTime = 0f;
-        }
-        else
-        {
-            simulationStartTime = 0f;
-            accumulatedRealTime = 0f;
-        }
+        simulationStartTime = 0f;
+        accumulatedRealTime = 0f;
         cachedRealTime = 0f;
         cachedSimulatedTime = 0f;
         cachedFPS = 0f;
@@ -156,58 +143,103 @@ public class Left_GUI : MonoBehaviour
         lastEntityCountUpdateTime = Time.realtimeSinceStartup;
     }
 
-    /// <summary>
-    /// Actualiza el conteo de entidades usando los queries cacheados.
-    /// </summary>
     private void UpdateEntityCounts()
     {
-        entityCounts.Clear();
-        int totalEntities = 0;
+        // Check World validity first
+        if (World.DefaultGameObjectInjectionWorld == null || !World.DefaultGameObjectInjectionWorld.IsCreated)
+        {
+             // Debug.LogWarning("Left_GUI: World not ready for entity count update."); // Reduce log spam
+             entityCounts.Clear();
+             entityCounts["Organism count"] = 0;
+             return;
+        }
         var entityManager = World.DefaultGameObjectInjectionWorld.EntityManager;
+        if (entityManager == null) return; // Extra safety check
+
+        var currentCounts = new Dictionary<string, int>();
+        int totalEntities = 0;
 
         foreach (var kvp in entityQueries)
         {
-            int count = kvp.Value.CalculateEntityCount();
-            string name = kvp.Key.Name.Replace("Component", "");
-            entityCounts[name] = count;
-            totalEntities += count;
+            // Removed the invalid 'IsCreated' check here.
+            // Rely on the World check above and the try-catch below.
+
+            try
+            {
+                // Calculate count - this might throw if the query became invalid due to structural changes.
+                int count = kvp.Value.CalculateEntityCount();
+                string name = kvp.Key.Name.Replace("Component", "");
+                currentCounts[name] = count;
+                totalEntities += count;
+            }
+            catch (InvalidOperationException ex)
+            {
+                 Debug.LogError($"Left_GUI: Error calculating entity count for {kvp.Key.Name}: {ex.Message}");
+                 // Optionally mark this query for potential re-creation later if errors persist
+            }
+             catch (Exception ex) // Catch other potential exceptions
+             {
+                 Debug.LogError($"Left_GUI: Unexpected error calculating entity count for {kvp.Key.Name}: {ex.Message}\n{ex.StackTrace}");
+             }
         }
-        entityCounts["Cantidad de organismos"] = totalEntities;
+        currentCounts["Organism count"] = totalEntities;
+        entityCounts = currentCounts;
     }
 
-    /// <summary>
-    /// Cachea la lista de tipos válidos que implementan IComponentData (filtrados por nombre)
-    /// y crea los EntityQuery correspondientes.
-    /// </summary>
+
     private void CacheValidComponentTypes()
     {
-        validComponentTypes.Clear();
-        entityQueries.Clear();
-
-        foreach (Type type in Assembly.GetExecutingAssembly().GetTypes())
+        if (World.DefaultGameObjectInjectionWorld == null || !World.DefaultGameObjectInjectionWorld.IsCreated)
         {
-            if (type.IsValueType && typeof(IComponentData).IsAssignableFrom(type))
+             Debug.LogWarning("Left_GUI: World not ready for caching component types.");
+             return;
+        }
+        var entityManager = World.DefaultGameObjectInjectionWorld.EntityManager;
+        if (entityManager == null) return;
+
+        // Dispose existing queries before clearing
+        foreach(var query in entityQueries.Values)
+        {
+            // Removed the invalid 'IsCreated' check. Dispose directly.
+            query.Dispose();
+        }
+        entityQueries.Clear();
+        validComponentTypes.Clear(); // Clear the type list as well
+
+
+        try
+        {
+            foreach (Type type in Assembly.GetExecutingAssembly().GetTypes())
             {
-                string typeName = type.Name;
-                if (typeName.EndsWith("Component") && typeName != "PrefabEntityComponent" && typeName != "PlaneComponent")
+                if (type.IsValueType && !type.IsAbstract && !type.IsGenericTypeDefinition && typeof(IComponentData).IsAssignableFrom(type))
                 {
-                    validComponentTypes.Add(type);
-                    var query = World.DefaultGameObjectInjectionWorld.EntityManager.CreateEntityQuery(ComponentType.ReadOnly(type));
-                    entityQueries.Add(type, query);
+                    string typeName = type.Name;
+                    if (typeName.EndsWith("Component") && typeName != "PrefabEntityComponent" && typeName != "PlaneComponent")
+                    {
+                        validComponentTypes.Add(type);
+                        var query = entityManager.CreateEntityQuery(ComponentType.ReadOnly(type));
+                        entityQueries.Add(type, query);
+                    }
                 }
             }
         }
+        catch (Exception ex)
+        {
+             Debug.LogError($"Left_GUI: Error during component type caching: {ex.Message}\n{ex.StackTrace}");
+        }
+         Debug.Log($"Left_GUI: Finished caching component types. Found {validComponentTypes.Count} valid types.");
     }
+
 
     void OnGUI()
     {
-        // Inicializa labelStyle de forma lazy.
         if (labelStyle == null)
         {
             labelStyle = new GUIStyle(GUI.skin.label)
             {
                 fontSize = GUIFontSize,
-                normal = { textColor = Color.black }
+                normal = { textColor = Color.white },
+                alignment = TextAnchor.MiddleLeft
             };
         }
 
@@ -218,38 +250,41 @@ public class Left_GUI : MonoBehaviour
 
     private void DisplaySimulationStats()
     {
-        int y = GUIYPosition + GUIFontSize;
-        GUI.Label(new Rect(GUIXPosition, y, GUIWidth, GUIHeight), $"FPS: {cachedFPS:F1}.", labelStyle);
-        y += GUIFontSize;
-        GUI.Label(new Rect(GUIXPosition, y, GUIWidth, GUIHeight), $"Tiempo Real: {FormatTime(cachedRealTime)}.", labelStyle);
-        y += GUIFontSize;
-        GUI.Label(new Rect(GUIXPosition, y, GUIWidth, GUIHeight), $"Tiempo Simulado: {FormatTime(cachedSimulatedTime)}.", labelStyle);
-        y += GUIFontSize;
-        GUI.Label(new Rect(GUIXPosition, y, GUIWidth, GUIHeight), $"Multiplicador de tiempo: {(GameStateManager.DeltaTime * cachedFPS):F2} x Tiempo Real.", labelStyle);
-        y += GUIFontSize;
-        GUI.Label(new Rect(GUIXPosition, y, GUIWidth, GUIHeight), $"DeltaTime: {GameStateManager.DeltaTime:F2}.", labelStyle);
-        y += GUIFontSize;
-        GUI.Label(new Rect(GUIXPosition, y, GUIWidth, GUIHeight), $"Frames Transcurridos: {cachedFrameCount}.", labelStyle);
-        y += GUIFontSize;
-        GUI.Label(new Rect(GUIXPosition, y, GUIWidth, GUIHeight), $"Pausado: {(GameStateManager.IsPaused ? "Sí" : "No")}.", labelStyle);
-        y += GUIFontSize;
+        int y = GUIYPosition + 5;
 
-        foreach (var entry in entityCounts)
+        GUI.Label(new Rect(GUIXPosition, y, GUIWidth, GUIHeight), $"FPS: {cachedFPS:F1}", labelStyle); y += GUIHeight;
+        GUI.Label(new Rect(GUIXPosition, y, GUIWidth, GUIHeight), $"Real Time: {FormatTime(cachedRealTime)}", labelStyle); y += GUIHeight;
+        GUI.Label(new Rect(GUIXPosition, y, GUIWidth, GUIHeight), $"Simulated Time: {FormatTime(cachedSimulatedTime)}", labelStyle); y += GUIHeight;
+
+        float timeMultiplier = GameStateManager.DeltaTime * 60f;
+        string multiplierText = hasStartedSimulation ? $"{timeMultiplier:F2}x" : "N/A";
+        GUI.Label(new Rect(GUIXPosition, y, GUIWidth, GUIHeight), $"Time Multiplier: {multiplierText}", labelStyle); y += GUIHeight;
+
+        GUI.Label(new Rect(GUIXPosition, y, GUIWidth, GUIHeight), $"DeltaTime: {GameStateManager.DeltaTime:F4}", labelStyle); y += GUIHeight;
+        GUI.Label(new Rect(GUIXPosition, y, GUIWidth, GUIHeight), $"Elapsed Frames: {cachedFrameCount}", labelStyle); y += GUIHeight;
+        GUI.Label(new Rect(GUIXPosition, y, GUIWidth, GUIHeight), $"Paused: {(GameStateManager.IsPaused ? "Yes" : "No")}", labelStyle); y += GUIHeight;
+
+        y += 5;
+        GUI.Label(new Rect(GUIXPosition, y, GUIWidth, GUIHeight), "--- Entities ---", labelStyle); y += GUIHeight;
+
+        var sortedEntityCounts = entityCounts.ToList();
+        sortedEntityCounts.Sort((pair1, pair2) => pair1.Key.CompareTo(pair2.Key));
+
+        foreach (var entry in sortedEntityCounts)
         {
-            if (entry.Value > 0)
-            {
-                GUI.Label(new Rect(GUIXPosition, y, GUIWidth, GUIHeight), $"{entry.Key}: {entry.Value}.", labelStyle);
-                y += GUIFontSize;
-            }
+            GUI.Label(new Rect(GUIXPosition, y, GUIWidth, GUIHeight), $"{entry.Key}: {entry.Value}", labelStyle); y += GUIHeight;
         }
     }
 
     private string FormatTime(float timeInSeconds)
     {
-        int days = Mathf.FloorToInt(timeInSeconds / 86400f);
-        int hours = Mathf.FloorToInt((timeInSeconds % 86400f) / 3600f);
-        int minutes = Mathf.FloorToInt((timeInSeconds % 3600f) / 60f);
-        int seconds = Mathf.FloorToInt(timeInSeconds % 60f);
-        return $"{days:D2} días: {hours:D2} horas: {minutes:D2} minutos: {seconds:D2} segundos";
+        TimeSpan t = TimeSpan.FromSeconds(timeInSeconds);
+        string formatted = "";
+        if (t.Days > 0) formatted += $"{t.Days}d ";
+        if (t.Hours > 0 || !string.IsNullOrEmpty(formatted)) formatted += $"{t.Hours:D2}h ";
+        if (t.Minutes > 0 || !string.IsNullOrEmpty(formatted)) formatted += $"{t.Minutes:D2}m ";
+        formatted += $"{t.Seconds:D2}s";
+        if (string.IsNullOrEmpty(formatted)) formatted = "0s";
+        return formatted;
     }
 }

@@ -2007,7 +2007,7 @@ reload_btn = ctk.CTkButton(button_frame_bottom, text="Reload List", command=popu
                            text_color=BTN_RELOAD_TEXT_COLOR[mode_idx])
 reload_btn.grid(row=0, column=1, padx=10, pady=5)
 
-graph_btn = ctk.CTkButton(button_frame_bottom, text="Show Graphs", command=on_show_graphs_thread, font=APP_FONT, height=button_height,
+graph_btn = ctk.CTkButton(button_frame_bottom, text="Simulation Statistics", command=on_show_graphs_thread, font=APP_FONT, height=button_height,
                           fg_color=BTN_GRAPH_FG_COLOR[mode_idx],
                           hover_color=BTN_GRAPH_HOVER_COLOR[mode_idx],
                           text_color=BTN_GRAPH_TEXT_COLOR[mode_idx])

@@ -28,7 +28,7 @@ public class CreatePrefabsOnClick : MonoBehaviour
         mainCamera = Camera.main;
         if (mainCamera == null)
         {
-            Debug.LogError("CreatePrefabsOnClick: No se encontró una cámara principal.");
+            Debug.LogError("CreatePrefabsOnClick: No main camera found.");
             return;
         }
 
@@ -38,11 +38,11 @@ public class CreatePrefabsOnClick : MonoBehaviour
 
         if (prefabs.Count == 0)
         {
-            Debug.LogError("No se encontraron prefabs en Resources/Prefabs.");
+            Debug.LogError("No prefabs found in Resources/Prefabs.");
             return;
         }
 
-        Debug.Log($"Se encontraron {prefabs.Count} prefabs.");
+        Debug.Log($"Found {prefabs.Count} prefabs.");
 
         spawnerQuery = entityManager.CreateEntityQuery(typeof(PrefabEntityComponent));
 
@@ -78,14 +78,14 @@ public class CreatePrefabsOnClick : MonoBehaviour
         if (currentPrefabIndex >= prefabs.Count) return;
 
         string prefabName = prefabs[currentPrefabIndex].name;
-        messageText.text = $"Por favor, clickee para colocar '{prefabName}'.";
+        messageText.text = $"Please click to place '{prefabName}'.";
         isWaitingForClick = true;
     }
 
     private void OnAllPrefabsPlaced()
     {
-        Debug.Log("Todos los prefabs colocados.");
-        messageText.text = "Todos los prefabs han sido colocados.";
+        Debug.Log("All prefabs have been placed.");
+        messageText.text = "All prefabs have been placed.";
         isWaitingForClick = false;
         StartCoroutine(ShowFinalMessageAndCompleteSetup());
     }
@@ -139,7 +139,7 @@ public class CreatePrefabsOnClick : MonoBehaviour
         entityManager.DestroyEntity(toDestroy);
         toDestroy.Dispose();
 
-        Debug.Log("Se han eliminado entidades excepto spawners y plano.");
+        Debug.Log("Entities have been deleted except for spawners and plane.");
 
         currentPrefabIndex = 0;
         isWaitingForClick = false;
