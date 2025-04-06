@@ -168,7 +168,7 @@ def SimulationGraphics(simulation_name):
 
     known_columns = { # Usar un set para búsquedas más rápidas
         "Timestamp", "FPS", "RealTime", "SimulatedTime",
-        "DeltaTime", "FrameCount", "Pausado", "Cantidad de organismos"
+        "DeltaTime", "FrameCount", "Pausado", "Organism count"
     }
     organism_columns = [col for col in df.columns if col not in known_columns]
 
@@ -238,9 +238,9 @@ def SimulationGraphics(simulation_name):
         print("No se encontraron columnas de organismos específicas, omitiendo gráfico Organism Counts.")
 
     # --- Gráfico 4: Total Organisms over Time ---
-    if "Cantidad de organismos" in df.columns:
+    if "Organism count" in df.columns:
         plt.figure(figsize=(12, 6))
-        plt.plot(df["Timestamp"], df["Cantidad de organismos"], marker=".", linestyle="-", color="purple")
+        plt.plot(df["Timestamp"], df["Organism count"], marker=".", linestyle="-", color="purple")
         plt.title(f"Total Organisms over Time ({simulation_name})")
         plt.xlabel("Timestamp")
         plt.ylabel("Total Count")
@@ -253,7 +253,7 @@ def SimulationGraphics(simulation_name):
             print(f"Error al guardar total_organisms.png: {e}")
         plt.close()
     else:
-        print("Columna 'Cantidad de organismos' no encontrada, omitiendo gráfico Total Organisms.")
+        print("Columna 'Organism count' no encontrada, omitiendo gráfico Total Organisms.")
 
     # --- Gráfico 5: Frame Count over Time ---
     if "FrameCount" in df.columns:
@@ -292,22 +292,22 @@ def SimulationGraphics(simulation_name):
          print("Columna 'FPS' encontrada pero sin datos válidos, omitiendo histograma FPS.")
 
     # --- Gráfico 7: Average FPS per Total Organisms ---
-    if "Cantidad de organismos" in df.columns and "FPS" in df.columns and not df["Cantidad de organismos"].isnull().all() and not df["FPS"].isnull().all():
-        # Asegurarse de que 'Cantidad de organismos' sea numérico para agrupar correctamente
-        if pd.api.types.is_numeric_dtype(df["Cantidad de organismos"]):
+    if "Organism count" in df.columns and "FPS" in df.columns and not df["Organism count"].isnull().all() and not df["FPS"].isnull().all():
+        # Asegurarse de que 'Organism count' sea numérico para agrupar correctamente
+        if pd.api.types.is_numeric_dtype(df["Organism count"]):
              # Convertir a int si es posible para tener categorías más limpias
-            df_agrupable = df.dropna(subset=["Cantidad de organismos", "FPS"])
+            df_agrupable = df.dropna(subset=["Organism count", "FPS"])
             try:
-                 df_agrupable["Cantidad de organismos"] = df_agrupable["Cantidad de organismos"].astype(int)
+                 df_agrupable["Organism count"] = df_agrupable["Organism count"].astype(int)
             except ValueError:
-                 print("Advertencia: 'Cantidad de organismos' contiene valores no enteros, agrupando por valores flotantes.")
+                 print("Advertencia: 'Organism count' contiene valores no enteros, agrupando por valores flotantes.")
 
             # Agrupar y calcular media
-            df_grouped = df_agrupable.groupby("Cantidad de organismos")["FPS"].mean().reset_index()
+            df_grouped = df_agrupable.groupby("Organism count")["FPS"].mean().reset_index()
 
             if not df_grouped.empty:
                 plt.figure(figsize=(12, 6))
-                plt.plot(df_grouped["Cantidad de organismos"], df_grouped["FPS"], marker="o", linestyle="-", color="red")
+                plt.plot(df_grouped["Organism count"], df_grouped["FPS"], marker="o", linestyle="-", color="red")
                 plt.title(f"Average FPS per Total Organisms ({simulation_name})")
                 plt.xlabel("Total Organisms")
                 plt.ylabel("Average FPS")
@@ -321,7 +321,7 @@ def SimulationGraphics(simulation_name):
             else:
                 print("No se pudieron agrupar datos para el gráfico Average FPS per Total Organisms.")
         else:
-            print("Columna 'Cantidad de organismos' no es numérica, omitiendo gráfico Average FPS per Total Organisms.")
+            print("Columna 'Organism count' no es numérica, omitiendo gráfico Average FPS per Total Organisms.")
 
     # --- Gráfico 8: Organisms per Simulated Time ---
     if "SimulatedTime" in df.columns and organism_columns:

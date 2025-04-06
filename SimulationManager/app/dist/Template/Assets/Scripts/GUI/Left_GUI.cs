@@ -31,7 +31,7 @@ public class Left_GUI : MonoBehaviour
 
     // Conteo de entidades y tipos
     public Dictionary<string, int> entityCounts = new Dictionary<string, int>();
-    private List<Type> validComponentTypes = new List<Type>();
+    public List<Type> validComponentTypes = new List<Type>();
     private Dictionary<Type, EntityQuery> entityQueries = new Dictionary<Type, EntityQuery>();
 
     // GUIStyle

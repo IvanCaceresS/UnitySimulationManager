@@ -122,12 +122,16 @@ public class SimulationLogger : MonoBehaviour
     /// </summary>
     private IEnumerator WaitForOrganismNamesAndStartLogging()
     {
-        // Espera indefinidamente hasta que la lista no sea nula y contenga al menos un elemento
-        // distinto a "Cantidad de organismos".
-        while (leftGui.OrganismNames == null || !leftGui.OrganismNames.Any(name => !string.IsNullOrEmpty(name) && name != "Cantidad de organismos"))
+        Debug.Log("SimulationLogger: Esperando a que Left_GUI cachee los tipos de organismos...");
+        // Espera indefinidamente hasta que leftGui no sea nulo
+        // y la lista validComponentTypes (la fuente real de nombres específicos) contenga al menos un elemento.
+        while (leftGui == null || leftGui.validComponentTypes == null || !leftGui.validComponentTypes.Any()) // <-- Condición Cambiada
         {
-            yield return null;
+            // Opcional: Añadir un pequeño delay para no consumir 100% CPU en el bucle while si algo va mal
+            // yield return new WaitForSeconds(0.1f);
+            yield return null; // Espera al siguiente frame
         }
+        Debug.Log($"SimulationLogger: Left_GUI tiene {leftGui.validComponentTypes.Count} tipos de organismos. Iniciando logging.");
         StartLogging();
     }
 
