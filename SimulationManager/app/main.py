@@ -1919,7 +1919,158 @@ verify_btn.pack(fill="x", padx=15, pady=5)
 
 separator = ctk.CTkFrame(sidebar_frame, height=2, fg_color="gray"); separator.pack(fill="x", padx=15, pady=15)
 
-unity_down_btn = ctk.CTkButton(sidebar_frame, text="Download Unity Hub", command=lambda: webbrowser.open(f"unityhub://{UNITY_REQUIRED_VERSION_STRING}/b2e806cf271c"), font=APP_FONT,
+class UnityHubInfoDialog(ctk.CTkToplevel):
+    def __init__(self, parent, title, message_text, download_url):
+        super().__init__(parent)
+        self.title(title)
+        apply_icon(self)
+        self.resizable(False, False)
+        self.transient(parent)
+        self.grab_set()
+
+        self._message = message_text
+        self._download_url = download_url
+
+        # --- Layout ---
+        self.grid_columnconfigure(0, weight=1)
+        self.grid_rowconfigure(0, weight=1)
+        self.grid_rowconfigure(1, weight=0)
+        self.grid_rowconfigure(2, weight=0)
+
+        # Message Label
+        self.message_label = ctk.CTkLabel(self, text=self._message, font=APP_FONT, justify="left", wraplength=400)
+        self.message_label.grid(row=0, column=0, columnspan=2, padx=20, pady=(20, 15), sticky="w")
+
+        # Link Section Frame
+        link_frame = ctk.CTkFrame(self, fg_color="transparent")
+        link_frame.grid(row=1, column=0, columnspan=2, padx=20, pady=(0, 10), sticky="ew")
+        link_frame.grid_columnconfigure(1, weight=1)
+
+        ctk.CTkLabel(link_frame, text="Download Link:", font=APP_FONT_BOLD).grid(row=0, column=0, padx=(0, 5), sticky="w")
+        self.link_entry = ctk.CTkEntry(link_frame, font=APP_FONT)
+        self.link_entry.insert(0, self._download_url)
+        self.link_entry.configure(state="readonly")
+        self.link_entry.grid(row=0, column=1, sticky="ew")
+
+        # Button Frame
+        button_frame = ctk.CTkFrame(self, fg_color="transparent")
+        button_frame.grid(row=2, column=0, columnspan=2, padx=20, pady=(10, 20), sticky="e")
+
+        mode_idx = get_color_mode_index()
+
+        # Copy Button
+        self.copy_button = ctk.CTkButton(button_frame, text="Copy Link", command=self.copy_link, width=100, font=APP_FONT,
+                                         fg_color=BTN_RELOAD_FG_COLOR[mode_idx], hover_color=BTN_RELOAD_HOVER_COLOR[mode_idx]) # Example colors
+        self.copy_button.pack(side="left", padx=(0, 10))
+
+        # Open Button
+        open_button = ctk.CTkButton(button_frame, text="Open Page", command=self.open_download_page, width=100, font=APP_FONT,
+                                       fg_color=BTN_GRAPH_FG_COLOR[mode_idx], hover_color=BTN_GRAPH_HOVER_COLOR[mode_idx]) # Example colors
+        open_button.pack(side="left", padx=(0, 10))
+
+        # Close Button
+        close_button = ctk.CTkButton(button_frame, text="Close", command=self.destroy, width=80, font=APP_FONT,
+                                      fg_color=COLOR_WARNING_GENERAL[mode_idx], hover_color=COLOR_DANGER_GENERAL[mode_idx]) # Example colors
+        close_button.pack(side="left")
+
+        self.update_idletasks()
+        width = max(450, self.winfo_reqwidth())
+        height = self.winfo_reqheight()
+        center_window(self, width, height) 
+
+        self.bind("<Escape>", lambda e: self.destroy())
+        self.after(100, self.link_entry.focus) 
+        self.wait_window()
+
+    def copy_link(self):
+        try:
+            self.clipboard_clear()
+            self.clipboard_append(self._download_url)
+            print(f"Copied to clipboard: {self._download_url}")
+            original_text = self.copy_button.cget("text")
+            self.copy_button.configure(text="Copied!", state="disabled")
+            self.after(1500, lambda: self.copy_button.configure(text=original_text, state="normal"))
+        except Exception as e:
+            print(f"Error copying to clipboard: {e}")
+            messagebox.showerror("Clipboard Error", f"Could not copy link to clipboard:\n{e}", parent=self)
+
+    def open_download_page(self):
+        try:
+            webbrowser.open(self._download_url)
+            self.destroy()
+        except Exception as e:
+            print(f"Error opening URL in browser: {e}")
+            messagebox.showerror("Browser Error", f"Could not open the download page in your browser:\n{e}", parent=self)
+
+def handle_unity_download_click():
+    if not 'UNITY_REQUIRED_VERSION_STRING' in globals() or not UNITY_REQUIRED_VERSION_STRING:
+        print("Error: UNITY_REQUIRED_VERSION_STRING not defined.")
+        if 'main_window' in globals() and main_window.winfo_exists():
+             messagebox.showerror("Internal Error", "Required Unity version is not configured.", parent=main_window)
+        return
+
+    unity_uri = f"unityhub://{UNITY_REQUIRED_VERSION_STRING}/b2e806cf271c"
+
+    # Determine OS, download link, and specific build module
+    system_os = platform.system()
+    build_support_module = "" # Initialize
+    if system_os == "Windows":
+        hub_download_link = "https://public-cdn.cloud.unity3d.com/hub/prod/UnityHubSetup.exe"
+        os_name = "Windows"
+        build_support_module = "- Windows Build Support (IL2CPP)"
+    elif system_os == "Darwin":
+        hub_download_link = "https://public-cdn.cloud.unity3d.com/hub/prod/UnityHubSetup.dmg"
+        os_name = "macOS"
+        build_support_module = "- Mac Build Support (Mono)"
+    else:
+        hub_download_link = "https://unity.com/download"
+        os_name = system_os
+        build_support_module = "- Platform Build Support (check options)"
+
+    detailed_instructions = (
+        "To install the correct Unity Editor using this tool:\n\n"
+        "1. Install Unity Hub using the link below (if you haven't already), but don't run it after installation.\n\n"
+        "2. Close this message and click the 'Download Unity Editor' button in this app again.\n"
+        f"   This should open Unity Hub and automatically start the install process for the required editor version ({UNITY_REQUIRED_VERSION_STRING}).\n\n"
+        "3. During the editor installation setup within Unity Hub, carefully review the modules to install. Ensure these are selected:\n"
+        "   - Microsoft Visual Studio Community 2022\n"
+        f"   {build_support_module}\n\n"
+        "4. Continue the installation in Unity Editor until it is fully complete."
+    )
+
+    what_if_failed = (
+        "\n" + ("-" * 45) + "\n\n"
+        "If Unity Hub did NOT open when you clicked the button this time:\n"
+        "- This usually means Unity Hub is not installed or not correctly registered to handle `unityhub://` links.\n"
+        f"- Please ensure Unity Hub is installed (use the download link for {os_name} below).\n"
+        "- Once Unity Editor is installed, try clicking the 'Download Unity Editor' button again (Step 2 above)."
+    )
+
+    message_text = detailed_instructions + what_if_failed
+
+    try:
+        print(f"Attempting to open: {unity_uri}")
+        webbrowser.open(unity_uri)
+    except Exception as e:
+        print(f"Error attempting to open unityhub:// link: {e}")
+        if 'main_window' in globals() and main_window.winfo_exists():
+            messagebox.showwarning("Link Error",
+                                   f"Could not directly ask Unity Hub to open the link:\n{e}\n\n"
+                                   "Please follow the manual installation steps shown.", parent=main_window)
+
+    if 'main_window' in globals() and main_window.winfo_exists():
+        dialog = UnityHubInfoDialog(
+            parent=main_window,
+            title="Download Unity Editor / Hub Instructions",
+            message_text=message_text,
+            download_url=hub_download_link
+        )
+    else:
+        print("INFO (Fallback - Custom Dialog): " + message_text.replace('\n\n', ' | ').replace('\n', ' ') + f" | Link: {hub_download_link}")
+
+unity_down_btn = ctk.CTkButton(sidebar_frame, text="Download Unity Editor",
+                              command=handle_unity_download_click,
+                              font=APP_FONT,
                               fg_color=BTN_UNITY_DOWN_FG_COLOR[mode_idx],
                               hover_color=BTN_UNITY_DOWN_HOVER_COLOR[mode_idx],
                               text_color=BTN_UNITY_DOWN_TEXT_COLOR[mode_idx])
