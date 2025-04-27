@@ -129,7 +129,7 @@ def SimulationGraphics(simulation_name):
     simulation_folder = documents_path / "SimulationLoggerData" / simulation_name
 
     csv_path = simulation_folder / "SimulationStats.csv"
-    output_folder = simulation_folder / "Graficos"
+    output_folder = simulation_folder / "Graphics"
     output_folder.mkdir(parents=True, exist_ok=True)
 
     if not csv_path.exists():
@@ -1017,7 +1017,7 @@ def ensure_unity_closed():
 
 def open_graphs_folder(simulation_name):
     try:
-        fldr = Path.home()/"Documents"/"SimulationLoggerData"/simulation_name/"Graficos"
+        fldr = Path.home()/"Documents"/"SimulationLoggerData"/simulation_name/"Graphics"
         fldr.mkdir(parents=True, exist_ok=True)
         if platform.system() == "Windows": os.startfile(str(fldr))
         elif platform.system() == "Darwin": subprocess.Popen(["open", str(fldr)])
@@ -1691,7 +1691,7 @@ def show_graphs_logic(sim_name):
     try:
         data_dir = Path.home() / "Documents" / "SimulationLoggerData" / sim_name
         csv_path = data_dir / "SimulationStats.csv"
-        graphs_dir = data_dir / "Graficos" 
+        graphs_dir = data_dir / "Graphics" 
 
         if not csv_path.exists():
             messagebox.showerror("Data Not Found",
