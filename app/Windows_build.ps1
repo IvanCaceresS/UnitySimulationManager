@@ -219,6 +219,9 @@ $PyInstallerArgs = @(
     "--name=$BuildName",
     '--noconfirm',
     "--distpath=$BuildDistDir" # Tell PyInstaller the output folder name/path directly
+    '--add-data=".venv\Lib\site-packages\tiktoken_ext;tiktoken_ext"',
+    '--hidden-import=tiktoken_ext',
+    '--hidden-import=tiktoken.load'
 )
 if (Test-Path $IconWin -PathType Leaf) {
     Write-Host "Adding icon: $IconWin"

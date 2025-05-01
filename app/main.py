@@ -24,12 +24,13 @@ from openai import error as openai_error_v0
 import tiktoken
 import re
 from typing import Union, Tuple, Dict
+import plistlib
+
 AuthenticationError_v0 = openai_error_v0.AuthenticationError
 InvalidRequestError_v0 = openai_error_v0.InvalidRequestError
 APIConnectionError_v0 = openai_error_v0.APIConnectionError
 OPENAI_V0_ERROR_IMPORTED = True
 OPENAI_V1_CLIENT_EXISTS = False
-
 
 # ======================================================
 # Global State & Config Variables
@@ -62,7 +63,8 @@ tooltip_window = None
 tooltip_delay = 700
 tooltip_job_id = None
 logo_photo_ref = None
-ICON_PATH = "img/icono.ico"
+ICON_PATH_WIN = "img/icono.ico"
+ICON_PATH_MAC = "img/icono.icns"
 LOGO_PATHS = ["img/logo_light.png", "img/logo_dark.png"]
 LOGO_WIDTH = 200
 ctk.set_appearance_mode("System")
@@ -870,12 +872,14 @@ def center_window(window, width, height):
     window.geometry(f"{width}x{height}+{x}+{y}")
 
 def apply_icon(window):
-    """Aplica el icono global (ICON_PATH) a la ventana dada."""
+    """Aplica el icono .ico de Windows a la ventana dada, si corresponde."""
     try:
-        if ICON_PATH and os.path.exists(ICON_PATH) and platform.system() == "Windows":
-            window.iconbitmap(ICON_PATH)
+        # Usar la variable específica de Windows y la comprobación de plataforma
+        if ICON_PATH_WIN and os.path.exists(ICON_PATH_WIN) and platform.system() == "Windows":
+            window.iconbitmap(ICON_PATH_WIN)
     except tk.TclError as e:
-        print(f"Advertencia: Icono '{ICON_PATH}' no aplicable a una ventana. Error: {e}")
+        # Actualizar mensaje de error para reflejar la variable usada
+        print(f"Advertencia: Icono '{ICON_PATH_WIN}' no aplicable a una ventana. Error: {e}")
     except Exception as e:
         print(f"Error inesperado al aplicar icono: {e}")
 
@@ -1386,21 +1390,119 @@ def perform_verification(show_results_box=False, on_startup=False):
     req_ver = UNITY_REQUIRED_VERSION_STRING
 
     # Verify Unity Executable and Version
-    if not UNITY_EXECUTABLE: results.append("❌ Unity Exe: Path missing in .env file.")
-    elif not os.path.isfile(UNITY_EXECUTABLE): results.append(f"❌ Unity Exe: Path invalid or not found:\n   '{UNITY_EXECUTABLE}'")
+    if not UNITY_EXECUTABLE:
+        results.append("❌ Unity Exe: Path missing in .env file.")
+    elif not os.path.exists(UNITY_EXECUTABLE): # Usar exists para verificar existencia general (archivo o dir)
+        results.append(f"❌ Unity Exe: Path does not exist:\n    '{UNITY_EXECUTABLE}'")
     else:
-        unity_path_ok = True; results.append(f"✅ Unity Exe: Path OK.")
+        # La ruta existe, ahora verificamos si es válida para el OS y la versión
+        unity_path_ok = True # Asumimos OK por ahora si existe
+        results.append(f"✅ Unity Exe: Path exists.")
+
         try:
-            editor_folder = "Editor"; exe_name = "Unity.exe" if platform.system() == "Windows" else "Unity"
-            expected_suffix = os.path.join(req_ver, editor_folder, exe_name)
-            normalized_exe_path = os.path.normcase(os.path.abspath(UNITY_EXECUTABLE))
-            normalized_suffix = os.path.normcase(expected_suffix)
-            if normalized_exe_path.endswith(normalized_suffix):
-                unity_version_ok = True; results.append(f"✅ Unity Ver: Path ends correctly with '{expected_suffix}'.")
-            else:
-                parent_dir = os.path.dirname(normalized_exe_path)
-                results.append(f"❌ Unity Ver: Path NOT end with '{expected_suffix}'.\n   Found: '...{os.path.sep}{os.path.basename(parent_dir)}{os.path.sep}{os.path.basename(normalized_exe_path)}'")
-        except Exception as path_err: results.append(f"⚠️ Unity Ver: Path check error: {path_err}")
+            current_os = platform.system()
+
+            if current_os == "Windows":
+                if not os.path.isfile(UNITY_EXECUTABLE): # Windows espera un archivo .exe
+                    results.append(f"❌ Unity Exe: Path is not a file on Windows:\n    '{UNITY_EXECUTABLE}'")
+                    unity_path_ok = False # Invalidar si no es un archivo
+                else:
+                    # Verificación de versión en Windows (usando la estructura de ruta)
+                    editor_folder = "Editor"
+                    exe_name = "Unity.exe"
+                    expected_suffix = os.path.join(req_ver, editor_folder, exe_name)
+                    normalized_exe_path = os.path.normcase(os.path.abspath(UNITY_EXECUTABLE))
+                    normalized_suffix = os.path.normcase(expected_suffix)
+
+                    if normalized_exe_path.endswith(normalized_suffix):
+                        unity_version_ok = True
+                        results.append(f"✅ Unity Ver: Path indicates version {req_ver}.")
+                    else:
+                        # Intentar mostrar parte relevante de la ruta para feedback
+                        parent_dir = os.path.dirname(normalized_exe_path)
+                        grandparent_dir = os.path.dirname(parent_dir)
+                        # Manejar caso raíz (evitar error si no hay grandparent)
+                        if grandparent_dir and grandparent_dir != parent_dir:
+                            found_structure = f"...{os.sep}{os.path.basename(grandparent_dir)}{os.sep}{os.path.basename(parent_dir)}{os.sep}{os.path.basename(normalized_exe_path)}"
+                        elif parent_dir and parent_dir != normalized_exe_path:
+                            found_structure = f"...{os.sep}{os.path.basename(parent_dir)}{os.sep}{os.path.basename(normalized_exe_path)}"
+                        else:
+                            found_structure = f"...{os.sep}{os.path.basename(normalized_exe_path)}"
+                        results.append(f"❌ Unity Ver: Path structure mismatch.\n    Expected end: '...{os.sep}{expected_suffix}'\n    Found: '{found_structure}'")
+
+            elif current_os == "Darwin": # Verificación específica para macOS
+                plist_path = None
+                is_app_bundle = UNITY_EXECUTABLE.endswith(".app") and os.path.isdir(UNITY_EXECUTABLE)
+                # Comprobar si parece el binario ejecutable DENTRO del bundle
+                is_likely_binary = os.path.isfile(UNITY_EXECUTABLE) and "Contents/MacOS/Unity" in UNITY_EXECUTABLE.replace("\\", "/") # Normalizar separadores
+
+                if is_app_bundle:
+                    # El usuario seleccionó el .app directamente
+                    plist_path = os.path.join(UNITY_EXECUTABLE, "Contents", "Info.plist")
+                    unity_path_ok = True # .app bundle es una ruta válida en Mac
+                elif is_likely_binary:
+                    # El usuario seleccionó el binario interno, intentar encontrar el .app
+                    # Dividir por '.app/' para encontrar la base del bundle
+                    app_bundle_path_parts = UNITY_EXECUTABLE.replace("\\", "/").split(".app/")
+                    if len(app_bundle_path_parts) > 0:
+                        app_bundle_path = app_bundle_path_parts[0] + ".app"
+                        if os.path.isdir(app_bundle_path):
+                            plist_path = os.path.join(app_bundle_path, "Contents", "Info.plist")
+                            unity_path_ok = True # También consideramos válido si encontramos el .app
+                        else:
+                            unity_path_ok = False # No se pudo encontrar el .app bundle
+                            results.append(f"❌ Unity Exe: Path seems like internal binary, but couldn't find '.app' bundle.")
+                    else:
+                        unity_path_ok = False # Estructura inesperada
+                        results.append(f"❌ Unity Exe: Path is a file but not recognized as Unity binary within a .app bundle.")
+                else:
+                    # No es ni un .app ni el binario interno esperado
+                    unity_path_ok = False
+                    results.append(f"❌ Unity Exe: Path is not a valid '.app' bundle or recognized executable on macOS:\n    '{UNITY_EXECUTABLE}'")
+
+                # Si encontramos una ruta válida y el plist, verificamos la versión
+                if unity_path_ok and plist_path and os.path.exists(plist_path):
+                    try:
+                        with open(plist_path, 'rb') as fp:
+                            plist_data = plistlib.load(fp)
+                        # Usar CFBundleShortVersionString o CFBundleVersion
+                        detected_version = plist_data.get('CFBundleShortVersionString', plist_data.get('CFBundleVersion'))
+                        if detected_version:
+                            results.append(f"ℹ️ Unity Ver: Found version '{detected_version}' in Info.plist.")
+                            # Comparación directa (ajusta si es necesario comparar solo partes)
+                            if detected_version == req_ver:
+                                unity_version_ok = True
+                                results.append(f"✅ Unity Ver: Info.plist version matches required '{req_ver}'.")
+                            else:
+                                results.append(f"❌ Unity Ver: Info.plist version '{detected_version}' does NOT match required '{req_ver}'.")
+                        else:
+                            results.append(f"⚠️ Unity Ver: Could not find version string in Info.plist at '{plist_path}'.")
+                    except Exception as plist_err:
+                        results.append(f"⚠️ Unity Ver: Error reading Info.plist '{plist_path}'. Error: {plist_err}")
+                elif unity_path_ok:
+                    # No se pudo encontrar/leer plist, advertir
+                    results.append(f"⚠️ Unity Ver: Could not verify version via Info.plist for path '{UNITY_EXECUTABLE}'. Version check skipped.")
+
+            else: # Linux u otro OS
+                # Puedes añadir una verificación específica para Linux aquí si lo necesitas
+                results.append(f"⚠️ Unity Ver: Verification for {current_os} not fully implemented (only checks if path exists).")
+                # Verificación básica por si acaso
+                if os.path.isfile(UNITY_EXECUTABLE): # Asumir que es un archivo ejecutable
+                    unity_path_ok = True
+                    # Comprobación muy básica de versión (poco fiable)
+                    if req_ver in UNITY_EXECUTABLE:
+                        unity_version_ok = True
+                        results.append(f"✅ Unity Ver: Path contains required version string '{req_ver}'.")
+                    else:
+                        results.append(f"❌ Unity Ver: Path does not contain required version string '{req_ver}'.")
+                else:
+                    unity_path_ok = False
+                    results.append(f"❌ Unity Exe: Path is not a valid file on {current_os}.")
+
+
+        except Exception as ver_err:
+            results.append(f"⚠️ Unity Ver: Unexpected error during version check: {ver_err}")
+            print(f"Version check error: {ver_err}"); traceback.print_exc() # Registrar traceback para depuración
 
     # Verify Unity Projects Path
     if not UNITY_PROJECTS_PATH: results.append("❌ Projects Path: Missing in .env file.")
