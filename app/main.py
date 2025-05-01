@@ -15,7 +15,6 @@ import customtkinter as ctk
 from tkinter import messagebox, filedialog
 from tkinter import ttk
 from dotenv import load_dotenv
-from pathlib import Path
 import psutil
 import openai
 import math
@@ -1376,237 +1375,274 @@ def create_simulation_thread(sim_name, sim_desc, original_states):
 # ======================================================
 # Verification Logic
 # ======================================================
-def perform_verification(show_results_box=False, on_startup=False):
-    global unity_path_ok, unity_version_ok, unity_projects_path_ok, apis_key_ok, apis_models_ok, initial_verification_complete
-    global UNITY_EXECUTABLE, UNITY_PROJECTS_PATH, OPENAI_API_KEY, FINE_TUNED_MODEL_NAME, SECONDARY_FINE_TUNED_MODEL_NAME
+def perform_verification(show_results=False, on_startup=False):
+    # Declarar uso de globales (buena práctica) y añadir las de API
+    global unity_path_ok, unity_version_ok, unity_projects_path_ok, apis_key_ok, apis_models_ok
+    global initial_verification_complete, UNITY_EXECUTABLE, UNITY_PROJECTS_PATH, API_BASE_URL, API_KEY # Añadir API_KEY
     global SIMULATION_PROJECT_PATH, ASSETS_FOLDER, STREAMING_ASSETS_FOLDER, SIMULATION_LOADED_FILE, last_simulation_loaded, all_simulations_data
 
-    if not on_startup: update_status("Verifying configuration...")
-    load_dotenv('.env', override=True)
-    UNITY_EXECUTABLE = os.environ.get("UNITY_EXECUTABLE"); UNITY_PROJECTS_PATH = os.environ.get("UNITY_PROJECTS_PATH")
-    OPENAI_API_KEY = os.getenv("OPENAI_API_KEY"); FINE_TUNED_MODEL_NAME = os.getenv("FINE_TUNED_MODEL_NAME")
-    SECONDARY_FINE_TUNED_MODEL_NAME = os.getenv("2ND_FINE_TUNED_MODEL_NAME")
-    results = []; unity_path_ok=unity_version_ok=unity_projects_path_ok=apis_key_ok=apis_models_ok=False
+    if not on_startup:
+        # Usar verificación de existencia y llamada segura
+        status_func = globals().get('update_status')
+        if status_func and callable(status_func):
+             status_func("Verifying configuration...")
+        else:
+             print("Verifying configuration...")
+
+    # Initialize global status flags at the start of verification
+    unity_path_ok, unity_version_ok, unity_projects_path_ok = False, False, False
+    apis_key_ok, apis_models_ok = False, False # Initialize API flags too
+
+    # Load environment variables
+    dotenv_func = globals().get('load_dotenv')
+    if dotenv_func and callable(dotenv_func):
+        dotenv_func('.env', override=True)
+    UNITY_EXECUTABLE = os.getenv("UNITY_EXECUTABLE")
+    UNITY_PROJECTS_PATH = os.getenv("UNITY_PROJECTS_PATH")
+    API_BASE_URL = os.getenv("API_BASE_URL")
+    API_KEY = os.getenv("API_KEY") # Cargar la clave API del cliente
+
+    results = [] # Para el popup de detalles
     req_ver = UNITY_REQUIRED_VERSION_STRING
 
-    # Verify Unity Executable and Version
+    # --- Verify Unity Executable and Version ---
     if not UNITY_EXECUTABLE:
         results.append("❌ Unity Exe: Path missing in .env file.")
-    elif not os.path.exists(UNITY_EXECUTABLE): # Usar exists para verificar existencia general (archivo o dir)
+    elif not os.path.exists(UNITY_EXECUTABLE):
         results.append(f"❌ Unity Exe: Path does not exist:\n    '{UNITY_EXECUTABLE}'")
     else:
-        # La ruta existe, ahora verificamos si es válida para el OS y la versión
-        unity_path_ok = True # Asumimos OK por ahora si existe
+        # Path exists, mark this part OK for now, might be invalidated by OS check
+        unity_path_ok = True # <<< ACTUALIZA GLOBAL
         results.append(f"✅ Unity Exe: Path exists.")
-
         try:
             current_os = platform.system()
-
             if current_os == "Windows":
-                if not os.path.isfile(UNITY_EXECUTABLE): # Windows espera un archivo .exe
+                if not os.path.isfile(UNITY_EXECUTABLE):
                     results.append(f"❌ Unity Exe: Path is not a file on Windows:\n    '{UNITY_EXECUTABLE}'")
-                    unity_path_ok = False # Invalidar si no es un archivo
+                    unity_path_ok = False # <<< CORRIGE GLOBAL
                 else:
-                    # Verificación de versión en Windows (usando la estructura de ruta)
-                    editor_folder = "Editor"
-                    exe_name = "Unity.exe"
+                    editor_folder = "Editor"; exe_name = "Unity.exe"
                     expected_suffix = os.path.join(req_ver, editor_folder, exe_name)
                     normalized_exe_path = os.path.normcase(os.path.abspath(UNITY_EXECUTABLE))
                     normalized_suffix = os.path.normcase(expected_suffix)
-
                     if normalized_exe_path.endswith(normalized_suffix):
-                        unity_version_ok = True
+                        unity_version_ok = True # <<< ACTUALIZA GLOBAL
                         results.append(f"✅ Unity Ver: Path indicates version {req_ver}.")
                     else:
-                        # Intentar mostrar parte relevante de la ruta para feedback
-                        parent_dir = os.path.dirname(normalized_exe_path)
-                        grandparent_dir = os.path.dirname(parent_dir)
-                        # Manejar caso raíz (evitar error si no hay grandparent)
-                        if grandparent_dir and grandparent_dir != parent_dir:
-                            found_structure = f"...{os.sep}{os.path.basename(grandparent_dir)}{os.sep}{os.path.basename(parent_dir)}{os.sep}{os.path.basename(normalized_exe_path)}"
-                        elif parent_dir and parent_dir != normalized_exe_path:
-                            found_structure = f"...{os.sep}{os.path.basename(parent_dir)}{os.sep}{os.path.basename(normalized_exe_path)}"
-                        else:
-                            found_structure = f"...{os.sep}{os.path.basename(normalized_exe_path)}"
+                        parent_dir = os.path.dirname(normalized_exe_path); grandparent_dir = os.path.dirname(parent_dir)
+                        if grandparent_dir and grandparent_dir != parent_dir: found_structure = f"...{os.sep}{os.path.basename(grandparent_dir)}{os.sep}{os.path.basename(parent_dir)}{os.sep}{os.path.basename(normalized_exe_path)}"
+                        elif parent_dir and parent_dir != normalized_exe_path: found_structure = f"...{os.sep}{os.path.basename(parent_dir)}{os.sep}{os.path.basename(normalized_exe_path)}"
+                        else: found_structure = f"...{os.sep}{os.path.basename(normalized_exe_path)}"
                         results.append(f"❌ Unity Ver: Path structure mismatch.\n    Expected end: '...{os.sep}{expected_suffix}'\n    Found: '{found_structure}'")
-
-            elif current_os == "Darwin": # Verificación específica para macOS
-                plist_path = None
-                is_app_bundle = UNITY_EXECUTABLE.endswith(".app") and os.path.isdir(UNITY_EXECUTABLE)
-                # Comprobar si parece el binario ejecutable DENTRO del bundle
-                is_likely_binary = os.path.isfile(UNITY_EXECUTABLE) and "Contents/MacOS/Unity" in UNITY_EXECUTABLE.replace("\\", "/") # Normalizar separadores
-
+                        # unity_version_ok remains False
+            elif current_os == "Darwin":
+                plist_path = None; is_app_bundle = UNITY_EXECUTABLE.endswith(".app") and os.path.isdir(UNITY_EXECUTABLE); is_likely_binary = os.path.isfile(UNITY_EXECUTABLE) and "Contents/MacOS/Unity" in UNITY_EXECUTABLE.replace("\\", "/")
                 if is_app_bundle:
-                    # El usuario seleccionó el .app directamente
                     plist_path = os.path.join(UNITY_EXECUTABLE, "Contents", "Info.plist")
-                    unity_path_ok = True # .app bundle es una ruta válida en Mac
+                    # unity_path_ok remains True
                 elif is_likely_binary:
-                    # El usuario seleccionó el binario interno, intentar encontrar el .app
-                    # Dividir por '.app/' para encontrar la base del bundle
                     app_bundle_path_parts = UNITY_EXECUTABLE.replace("\\", "/").split(".app/")
                     if len(app_bundle_path_parts) > 0:
                         app_bundle_path = app_bundle_path_parts[0] + ".app"
-                        if os.path.isdir(app_bundle_path):
-                            plist_path = os.path.join(app_bundle_path, "Contents", "Info.plist")
-                            unity_path_ok = True # También consideramos válido si encontramos el .app
-                        else:
-                            unity_path_ok = False # No se pudo encontrar el .app bundle
-                            results.append(f"❌ Unity Exe: Path seems like internal binary, but couldn't find '.app' bundle.")
-                    else:
-                        unity_path_ok = False # Estructura inesperada
-                        results.append(f"❌ Unity Exe: Path is a file but not recognized as Unity binary within a .app bundle.")
-                else:
-                    # No es ni un .app ni el binario interno esperado
-                    unity_path_ok = False
-                    results.append(f"❌ Unity Exe: Path is not a valid '.app' bundle or recognized executable on macOS:\n    '{UNITY_EXECUTABLE}'")
-
-                # Si encontramos una ruta válida y el plist, verificamos la versión
+                        if os.path.isdir(app_bundle_path): plist_path = os.path.join(app_bundle_path, "Contents", "Info.plist"); # unity_path_ok remains True
+                        else: unity_path_ok = False; results.append(f"❌ Unity Exe: Path seems like internal binary, but couldn't find '.app' bundle.") # <<< CORRIGE GLOBAL
+                    else: unity_path_ok = False; results.append(f"❌ Unity Exe: Path is a file but not recognized as Unity binary within a .app bundle.") # <<< CORRIGE GLOBAL
+                else: unity_path_ok = False; results.append(f"❌ Unity Exe: Path is not a valid '.app' bundle or recognized executable on macOS:\n    '{UNITY_EXECUTABLE}'") # <<< CORRIGE GLOBAL
                 if unity_path_ok and plist_path and os.path.exists(plist_path):
                     try:
-                        with open(plist_path, 'rb') as fp:
-                            plist_data = plistlib.load(fp)
-                        # Usar CFBundleShortVersionString o CFBundleVersion
+                        with open(plist_path, 'rb') as fp: plist_data = plistlib.load(fp)
                         detected_version = plist_data.get('CFBundleShortVersionString', plist_data.get('CFBundleVersion'))
                         if detected_version:
-                            results.append(f"ℹ️ Unity Ver: Found version '{detected_version}' in Info.plist.")
-                            # Comparación directa (ajusta si es necesario comparar solo partes)
-                            if detected_version == req_ver:
-                                unity_version_ok = True
-                                results.append(f"✅ Unity Ver: Info.plist version matches required '{req_ver}'.")
-                            else:
-                                results.append(f"❌ Unity Ver: Info.plist version '{detected_version}' does NOT match required '{req_ver}'.")
-                        else:
-                            results.append(f"⚠️ Unity Ver: Could not find version string in Info.plist at '{plist_path}'.")
-                    except Exception as plist_err:
-                        results.append(f"⚠️ Unity Ver: Error reading Info.plist '{plist_path}'. Error: {plist_err}")
-                elif unity_path_ok:
-                    # No se pudo encontrar/leer plist, advertir
-                    results.append(f"⚠️ Unity Ver: Could not verify version via Info.plist for path '{UNITY_EXECUTABLE}'. Version check skipped.")
-
+                             results.append(f"ℹ️ Unity Ver: Found version '{detected_version}' in Info.plist.")
+                             if detected_version == req_ver: unity_version_ok = True; results.append(f"✅ Unity Ver: Info.plist version matches required '{req_ver}'.") # <<< ACTUALIZA GLOBAL
+                             else: results.append(f"❌ Unity Ver: Info.plist version '{detected_version}' does NOT match required '{req_ver}'.") # unity_version_ok remains False
+                        else: results.append(f"⚠️ Unity Ver: Could not find version string in Info.plist at '{plist_path}'.")
+                    except Exception as plist_err: results.append(f"⚠️ Unity Ver: Error reading Info.plist '{plist_path}'. Error: {plist_err}")
+                elif unity_path_ok: results.append(f"⚠️ Unity Ver: Could not verify version via Info.plist for path '{UNITY_EXECUTABLE}'. Version check skipped.")
             else: # Linux u otro OS
-                # Puedes añadir una verificación específica para Linux aquí si lo necesitas
-                results.append(f"⚠️ Unity Ver: Verification for {current_os} not fully implemented (only checks if path exists).")
-                # Verificación básica por si acaso
-                if os.path.isfile(UNITY_EXECUTABLE): # Asumir que es un archivo ejecutable
-                    unity_path_ok = True
-                    # Comprobación muy básica de versión (poco fiable)
-                    if req_ver in UNITY_EXECUTABLE:
-                        unity_version_ok = True
-                        results.append(f"✅ Unity Ver: Path contains required version string '{req_ver}'.")
-                    else:
-                        results.append(f"❌ Unity Ver: Path does not contain required version string '{req_ver}'.")
-                else:
-                    unity_path_ok = False
-                    results.append(f"❌ Unity Exe: Path is not a valid file on {current_os}.")
-
-
+                 results.append(f"⚠️ Unity Ver: Verification for {current_os} not fully implemented (only checks if path exists).")
+                 if os.path.isfile(UNITY_EXECUTABLE):
+                     # unity_path_ok remains True if it's a file
+                     if req_ver in UNITY_EXECUTABLE: unity_version_ok = True; results.append(f"✅ Unity Ver: Path contains required version string '{req_ver}'.") # <<< ACTUALIZA GLOBAL
+                     else: results.append(f"❌ Unity Ver: Path does not contain required version string '{req_ver}'.") # unity_version_ok remains False
+                 else: unity_path_ok = False; results.append(f"❌ Unity Exe: Path is not a valid file on {current_os}.") # <<< CORRIGE GLOBAL
         except Exception as ver_err:
             results.append(f"⚠️ Unity Ver: Unexpected error during version check: {ver_err}")
-            print(f"Version check error: {ver_err}"); traceback.print_exc() # Registrar traceback para depuración
+            print(f"Version check error: {ver_err}"); traceback.print_exc()
 
-    # Verify Unity Projects Path
-    if not UNITY_PROJECTS_PATH: results.append("❌ Projects Path: Missing in .env file.")
-    elif not os.path.isdir(UNITY_PROJECTS_PATH): results.append(f"❌ Projects Path: Invalid or not a directory:\n   '{UNITY_PROJECTS_PATH}'")
+    # --- Verify Unity Projects Path ---
+    if not UNITY_PROJECTS_PATH:
+        results.append("❌ Proj Path: Not defined.")
+    elif not Path(UNITY_PROJECTS_PATH).is_dir():
+        results.append(f"❌ Proj Path: Invalid:\n '{UNITY_PROJECTS_PATH}'")
     else:
-        unity_projects_path_ok = True; results.append(f"✅ Projects Path: Directory OK.")
-        SIMULATION_PROJECT_PATH = os.path.join(UNITY_PROJECTS_PATH, SIMULATION_PROJECT_NAME)
-        ASSETS_FOLDER = os.path.join(SIMULATION_PROJECT_PATH, "Assets")
-        STREAMING_ASSETS_FOLDER = os.path.join(ASSETS_FOLDER, "StreamingAssets")
-        SIMULATION_LOADED_FILE = os.path.join(STREAMING_ASSETS_FOLDER, "simulation_loaded.txt")
-        last_simulation_loaded = read_last_loaded_simulation_name()
+        unity_projects_path_ok = True # <<< ACTUALIZA GLOBAL
+        results.append("✅ Proj Path: OK.")
+        # Establecer rutas derivadas como objetos Path
+        base = Path(UNITY_PROJECTS_PATH)
+        SIM_PROJ = base / SIMULATION_PROJECT_NAME
+        ASSETS = SIM_PROJ / "Assets"
+        STREAM = ASSETS / "StreamingAssets"
+        STATE_F = STREAM / "simulation_loaded.txt"
+        # Asignar objetos Path directamente a globales
+        SIMULATION_PROJECT_PATH = SIM_PROJ
+        ASSETS_FOLDER = ASSETS
+        STREAMING_ASSETS_FOLDER = STREAM
+        SIMULATION_LOADED_FILE = STATE_F
+        # Leer último cargado (verificar si la función existe)
+        read_func = globals().get('read_last_loaded_simulation_name')
+        if read_func and callable(read_func):
+            last_simulation_loaded = read_func()
+        else:
+            last_simulation_loaded = None
 
-    # Verify OpenAI API Key and Models
-    apis_key_ok = False; apis_models_ok = False
-    if not OPENAI_API_KEY: results.append("❌ API Key: Missing in .env file.")
+    # --- Verify API (using external API server) ---
+    if not API_BASE_URL:
+        results.append("❌ API URL: Not defined.")
+        results.append("   ↳ Cannot check OpenAI / Server.")
+        # apis_key_ok and apis_models_ok permanecen False
     else:
+        results.append(f"ℹ️ API URL: {API_BASE_URL}")
+        url = f"{API_BASE_URL.rstrip('/')}/verify_config"
         try:
-            openai.api_key = OPENAI_API_KEY
-            openai.Model.list(limit=1)
-            apis_key_ok = True
-            results.append("✅ API Key: Connection successful (v0.x).")
-            list_models_func = lambda: openai.Model.list()
-            retrieve_model_func = lambda model_id: openai.Model.retrieve(model_id)
-            AuthErrType = AuthenticationError_v0
-            InvalidReqErrType = InvalidRequestError_v0
-            ConnErrType = APIConnectionError_v0
+            if not API_KEY: # Clave API del cliente
+                 results.append("❌ Client API Key: Not defined in .env.")
+                 results.append("   ↳ Cannot check OpenAI / Server Auth.")
+                 raise ValueError("Local API_KEY not configured for /verify_config call")
 
-            # Common Model Verification Logic
-            if apis_key_ok:
-                models_ok_list = []
-                primary_model_checked = False
-                for model_name_label, model_id in [("Primary Model", FINE_TUNED_MODEL_NAME), ("Secondary Model", SECONDARY_FINE_TUNED_MODEL_NAME)]:
-                    is_primary = (model_name_label == "Primary Model")
-                    if is_primary: primary_model_checked = True
+            headers = {'X-API-Key': API_KEY}
+            print(f" Verifying->{url} (with Client API Key)...")
 
-                    if not model_id:
-                        msg = f"⚠️ {model_name_label}: Not set in .env file."
-                        if is_primary: msg += " (Required for API creation)"
-                        results.append(msg)
-                        if is_primary: models_ok_list.append(False)
-                        continue
+            # Verificar si la librería 'requests' está disponible
+            if 'requests' in sys.modules:
+                resp = requests.get(url, headers=headers, timeout=15)
+                resp.raise_for_status()
+                data = resp.json()
+                print(f" Verifying<-{data}")
 
-                    try:
-                        retrieve_model_func(model_id)
-                        results.append(f"✅ {model_name_label}: ID '{model_id}' verified.")
-                        if is_primary: models_ok_list.append(True)
-                    except InvalidReqErrType as e:
-                        results.append(f"❌ {model_name_label}: ID '{model_id}' NOT FOUND or invalid. Error: {e}")
-                        if is_primary: models_ok_list.append(False)
-                    except Exception as model_error:
-                        results.append(f"❌ {model_name_label}: Error verifying ID '{model_id}'. Error: {type(model_error).__name__}: {model_error}")
-                        if is_primary: models_ok_list.append(False)
+                # Actualizar flags GLOBALES basados en la respuesta del servidor
+                apis_key_ok = data.get('openai_api_key_ok', False) # Clave OpenAI (en servidor)
+                primary_model_ok = data.get('primary_model_ok', False)
+                # secondary_model_ok = data.get('secondary_model_ok', False) # No crucial para estado OK?
+                apis_models_ok = apis_key_ok and primary_model_ok # API OK si clave OpenAI y modelo primario OK
 
-                apis_models_ok = primary_model_checked and models_ok_list and models_ok_list[0]
-                if not apis_models_ok and FINE_TUNED_MODEL_NAME: results.append("❌ Primary Model: Verification failed (Invalid/Not Found ID or API error).")
-                elif not FINE_TUNED_MODEL_NAME: results.append("❌ Primary Model: ID not specified in .env (Required for API creation).")
+                # Añadir detalles de la respuesta del servidor
+                dets = data.get('verification_details', {})
+                results.append(dets.get('openai_api_key_status', '❌ OpenAI Key Status (Server): ?'))
+                results.append(dets.get('api_server_key_status', '❌ Server Auth Key Status: ?')) # Estado de la clave Cliente
+                results.append(dets.get('primary_model_status', '❌ Primary Model (Server): ?'))
+                results.append(dets.get('secondary_model_status', '❌ Secondary Model (Server): ?'))
 
-        except AuthErrType as auth_err:
-             results.append(f"❌ API Key: Invalid or expired. Error: {auth_err}")
-             apis_key_ok = False; apis_models_ok = False
-        except ConnErrType as conn_err:
-             results.append(f"❌ API Connection: Failed to connect. Error: {conn_err}")
-             apis_key_ok = False; apis_models_ok = False
-        except Exception as api_err:
-             results.append(f"❌ API Error: Unexpected error during verification. Error: {type(api_err).__name__}: {api_err}")
-             apis_key_ok = False; apis_models_ok = False
-             print(f"Unexpected API verification error: {api_err}"); import traceback; traceback.print_exc()
+                # Corregir estado si la clave del cliente falló la autenticación en el servidor
+                server_auth_status = dets.get('api_server_key_status', '')
+                if "OK" not in server_auth_status and "Configured" not in server_auth_status and "✅" not in server_auth_status:
+                     apis_key_ok = False # Si la clave del cliente es mala, la API no está OK
+                     apis_models_ok = False
 
-    if not initial_verification_complete: initial_verification_complete = True
-    unity_status = "Unity OK" if unity_path_ok and unity_version_ok and unity_projects_path_ok else "Unity ERR"
-    api_status = "API OK" if apis_key_ok and apis_models_ok else "API ERR"
-    final_status = f"{unity_status} | {api_status}"
-
-    # Update GUI
-    if 'main_window' in globals() and main_window.winfo_exists():
-        main_window.after(0, lambda: update_status(final_status))
-        main_window.after(50, update_button_states)
-        all_simulations_data = get_simulations()
-        main_window.after(100, filter_simulations)
-
-        if on_startup:
-            errors = []
-            if not unity_path_ok or not unity_projects_path_ok: errors.append("- Invalid Unity Executable or Projects path.")
-            elif not unity_version_ok: errors.append(f"- Unity version/path mismatch (Requires ending '...{os.path.join(req_ver, 'Editor', 'Unity.exe')}').")
-            if not unity_path_ok or not unity_version_ok or not unity_projects_path_ok: errors.append("  (Unity features might fail)")
-            api_errors = False
-            if not os.getenv("OPENAI_API_KEY"): errors.append("- OpenAI API Key missing in .env."); api_errors=True
-            elif not apis_key_ok: errors.append("- OpenAI API Key invalid or connection failed."); api_errors=True
             else:
-                if not FINE_TUNED_MODEL_NAME: errors.append("- Primary fine-tuned model ID missing in .env."); api_errors=True
-                elif not apis_models_ok: errors.append("- Primary fine-tuned model ID invalid/not found."); api_errors=True
-            if api_errors: errors.append("  (API creation disabled)")
-            if errors:
-                msg = "Config Issues:\n\n" + "\n".join(errors) + "\n\nUse 'Settings' to fix .env file."
-                main_window.after(300, lambda m=msg: messagebox.showwarning("Initial Configuration Issues", m))
-    else: print(f"Verification Status (No GUI): {final_status}")
+                results.append("❌ API Serv Check: 'requests' library not imported/available.")
+                # apis_key_ok, apis_models_ok permanecen False
 
-    if show_results_box:
-        text = "Verification Results:\n\n" + "\n".join(results)
-        all_ok = unity_path_ok and unity_version_ok and unity_projects_path_ok and apis_key_ok and apis_models_ok
-        if 'main_window' in globals() and main_window.winfo_exists():
-             mtype = messagebox.showinfo if all_ok else messagebox.showwarning
-             title = "Verification Complete" if all_ok else "Verification Issues Found"
-             main_window.after(0, lambda t=title, msg=text: mtype(t, msg))
+        except ValueError as ve:
+            print(f" Local error before calling API: {ve}")
+            # apis_key_ok, apis_models_ok permanecen False
+        except requests.exceptions.ConnectionError:
+            results.append(f"❌ API Serv Check: CONNECTION FAILED! ({API_BASE_URL}). Is api.py running?")
+            apis_key_ok = apis_models_ok = False
+        except requests.exceptions.Timeout:
+            results.append(f"❌ API Serv Check: TIMEOUT! ({API_BASE_URL}).")
+            apis_key_ok = apis_models_ok = False
+        except requests.exceptions.RequestException as e:
+            results.append(f"❌ API Serv Check: Request error to {url}.")
+            err_b = f"{type(e).__name__}:{e}"; sc = "???"
+            if e.response is not None:
+                sc = str(e.response.status_code)
+                try: err_b = e.response.json().get('error', e.response.text)
+                except: err_b = e.response.text[:200] + "..."
+                if sc == '403': results.append(f"   ↳ Server Error(403): Access DENIED to /verify_config. Is client API_KEY correct?")
+                else: results.append(f"   ↳ Server Error({sc}): {err_b}")
+            else: results.append(f"   ↳ {err_b}")
+            apis_key_ok = apis_models_ok = False
+        except Exception as e:
+             results.append(f"❌ API Serv Check: Unexpected error: {type(e).__name__}")
+             print(f"--- CRITICAL ERROR verify_config call ---\n{traceback.format_exc()}\n--- End Error ---")
+             apis_key_ok = apis_models_ok = False
+
+    # --- Final Status Update ---
+    # !!! ELIMINADA la línea que sobrescribía globales con locales !!!
+
+    initial_verification_complete = True # Marcar verificación como completada
+
+    # Calcular string de estado usando las variables GLOBALES actualizadas
+    # <<< CORREGIDO: Usa globales >>>
+    u_stat = "Unity OK" if unity_path_ok and unity_version_ok and unity_projects_path_ok else "Unity ERR"
+    a_stat = "API OK" if apis_key_ok and apis_models_ok else "API ERR"
+    status = f"Status:{u_stat} | {a_stat}"
+
+    # --- Actualizar GUI y mostrar resultados ---
+    main_window_obj = globals().get('main_window')
+    if main_window_obj and isinstance(main_window_obj, tk.Tk) and hasattr(main_window_obj, 'winfo_exists') and main_window_obj.winfo_exists():
+        update_status_func = globals().get('update_status')
+        if update_status_func and callable(update_status_func):
+             main_window_obj.after(0, lambda s=status: update_status_func(s))
+
+        update_buttons_func = globals().get('update_button_states')
+        if update_buttons_func and callable(update_buttons_func):
+             main_window_obj.after(50, update_buttons_func)
+
+        # Recargar lista de simulaciones si la ruta de proyectos es válida
+        if unity_projects_path_ok: # Usar global
+             get_sims_func = globals().get('get_simulations')
+             if get_sims_func and callable(get_sims_func):
+                  all_simulations_data = get_sims_func()
+             else: print("Warning: get_simulations function not available.")
+
+             filter_sims_func = globals().get('filter_simulations')
+             if filter_sims_func and callable(filter_sims_func):
+                  main_window_obj.after(100, filter_sims_func)
+             else: print("Warning: filter_simulations function not available for GUI update.")
+
+        # Mostrar errores de inicio si aplica
+        if on_startup:
+            errs = []
+            api_err_flag = False
+            # Comprobar estado de Unity con globales
+            if not unity_path_ok or not unity_projects_path_ok: errs.append("- Unity paths not OK.")
+            elif not unity_version_ok: errs.append(f"- Unity Version/Path not OK (req:'{req_ver}').")
+            if not unity_path_ok or not unity_version_ok or not unity_projects_path_ok: errs.append("  (Unity features might fail)")
+            # Comprobar estado de API con globales
+            if not API_BASE_URL: errs.append("- API URL not configured."); api_err_flag=True
+            elif not apis_key_ok: errs.append("- API Server: API Key/Auth Error."); api_err_flag=True
+            elif not apis_models_ok: errs.append("- API Server: Primary Model Error."); api_err_flag=True
+            if api_err_flag: errs.append("  (API Creation/Verification OFF)")
+            # Mostrar mensaje si hay errores
+            if errs:
+                msg = "Initial Config Problems:\n\n" + "\n".join(errs) + "\n\nUse 'Settings'(local) and verify 'api.py'/'api.env'."
+                msgbox_func = globals().get('messagebox')
+                if msgbox_func and callable(msgbox_func.showwarning):
+                     main_window_obj.after(300, lambda m=msg: msgbox_func.showwarning("Config Problems", m, parent=main_window_obj))
+                else:
+                     print(f"Config Problems (no GUI): {msg}")
+    else: # No GUI
+         print(f"Verification Status (no GUI): {status}")
+
+    # Mostrar resultados detallados si se pidió
+    if show_results:
+         txt = "Verification Results:\n\n---Local---\n" + "\n".join([r for r in results if "Unity" in r or "Proj" in r or "URL" in r]) + \
+               "\n\n---OpenAI & Server Auth (via API)---\n" + "\n".join([r for r in results if "API" in r or "Model" in r or "?" in r or "Server" in r or "OpenAI" in r]) # Filtro mejorado
+         # Usar variables GLOBALES para el estado general final
+         # <<< CORREGIDO: Usa globales >>>
+         all_ok = unity_path_ok and unity_version_ok and unity_projects_path_ok and apis_key_ok and apis_models_ok
+         main_window_obj_results = globals().get('main_window')
+         msgbox_func_results = globals().get('messagebox')
+         if main_window_obj_results and isinstance(main_window_obj_results, tk.Tk) and hasattr(main_window_obj_results, 'winfo_exists') and main_window_obj_results.winfo_exists() and msgbox_func_results and callable(msgbox_func_results.showinfo):
+             mt = msgbox_func_results.showinfo if all_ok else msgbox_func_results.showwarning
+             tl = "Verification OK" if all_ok else "Verification Problems"
+             main_window_obj_results.after(0, lambda t=tl, m=txt: mt(t, m, parent=main_window_obj_results))
+         else: # No GUI
+             print("\nVerification Results (no GUI):")
+             print(txt)
+             print(f"\nOverall Status: {'OK' if all_ok else 'PROBLEMS'}")
 
 
 # ======================================================
