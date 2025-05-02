@@ -2217,80 +2217,74 @@ def format_time(seconds: Union[float, int, None]) -> str:
         return f"{seconds}s"
 
 def monitor_unity_progress(stop_event: threading.Event, operation_tag: str):
-    """Monitors the size of the Unity project folder during operations like build/load."""
-    if not SIMULATION_PROJECT_PATH or not Path(SIMULATION_PROJECT_PATH).exists():
-        print(f"\nWarning: Project path '{SIMULATION_PROJECT_PATH}' missing at start of monitor.")
+    global SIMULATION_PROJECT_PATH
+
+    project_path = None
+    if SIMULATION_PROJECT_PATH:
+        try:
+            project_path = Path(SIMULATION_PROJECT_PATH)
+            if not project_path.is_dir():
+                print(f"[{operation_tag}] Monitor: Project path '{project_path}' not found initially. Will check again.")
+        except Exception as path_e:
+            print(f"[{operation_tag}] Monitor Error: Invalid project path '{SIMULATION_PROJECT_PATH}': {path_e}")
+            update_status(f"[{operation_tag}] Error: Invalid project path. Cannot monitor.")
+            return
+    else:
+        print(f"[{operation_tag}] Monitor Error: SIMULATION_PROJECT_PATH is None. Cannot monitor.")
+        update_status(f"[{operation_tag}] Error: Project path not set. Cannot monitor.")
         return
 
-    TARGET_MB = 3000.0 # Estimated target size in MB for progress calculation (adjust as needed)
-    BYTES_PER_MB = 1024 * 1024
-    TARGET_BYTES = TARGET_MB * BYTES_PER_MB
-    UPDATE_INTERVAL = 1.5 # Seconds between size checks
+    UPDATE_INTERVAL = 1.0
+    SIZE_CHECK_INTERVAL = 5.0
 
-    last_update_time = 0
+    last_time_update = 0
+    last_size_check_time = 0
+    last_logged_mb = -1.0
     start_time = time.time()
-    initial_bytes = 0
-    eta_str = "Calculating..."
 
-    try:
-        initial_bytes = get_folder_size(SIMULATION_PROJECT_PATH)
-    except Exception as e:
-        print(f"\nError getting initial project size: {e}")
-        initial_bytes = 0
-
-    initial_mb = initial_bytes / BYTES_PER_MB
-    print(f"[{operation_tag}] Monitor Started. Initial size: {initial_mb:.1f}MB. Target: {TARGET_MB:.0f}MB")
+    print(f"[{operation_tag}] Monitor Thread Started. Tracking elapsed time.")
+    update_status(f"[{operation_tag}] Starting...")
 
     while not stop_event.is_set():
         current_time = time.time()
-        if current_time - last_update_time > UPDATE_INTERVAL:
-            current_bytes = 0
+
+        if current_time - last_time_update >= UPDATE_INTERVAL:
+            elapsed_time = current_time - start_time
+            formatted_elapsed_time = format_time(elapsed_time)
+
+            status_message = f"[{operation_tag}] Running... Elapsed: {formatted_elapsed_time}"
+            update_status(status_message.ljust(60))
+            last_time_update = current_time
+
+        if project_path and (current_time - last_size_check_time >= SIZE_CHECK_INTERVAL):
             try:
-                current_bytes = get_folder_size(SIMULATION_PROJECT_PATH)
-                current_mb = current_bytes / BYTES_PER_MB
-                elapsed_time = current_time - start_time
-                size_increase = current_bytes - initial_bytes
-
-                # Calculate ETA only after some time has passed and size has increased
-                if elapsed_time > 5 and size_increase > BYTES_PER_MB: # Require >1MB increase
-                    bytes_per_second = size_increase / elapsed_time
-                    remaining_bytes = TARGET_BYTES - current_bytes
-                    if bytes_per_second > 0 and remaining_bytes > 0:
-                        eta_seconds = remaining_bytes / bytes_per_second
-                        eta_str = f"ETA: {format_time(eta_seconds)}"
-                    elif remaining_bytes <= 0:
-                        eta_str = "ETA: Finalizing" # Or "Completed"?
-                    else: # Rate is zero or negative, or target already met
-                        eta_str = "ETA: --"
-                elif elapsed_time <= 5:
-                    eta_str = "ETA: Calculating..."
-                else: # Not enough increase yet
-                    eta_str = "ETA: --"
-
-                # Calculate progress percentage
-                progress_percent = (current_mb / TARGET_MB) * 100 if TARGET_MB > 0 else 0
-                display_progress = min(progress_percent, 100.0) # Cap at 100%
-
-                status_message = (
-                    f"[{operation_tag}] Progress: {current_mb:.1f}/{TARGET_MB:.0f}MB "
-                    f"({display_progress:.1f}%) - {eta_str}"
-                )
-                update_status(status_message.ljust(60)) # Pad for consistent width
-
+                if project_path.is_dir():
+                    current_bytes = get_folder_size(project_path)
+                    current_mb = current_bytes / (1024*1024)
+                    if abs(current_mb - last_logged_mb) > 1.0:
+                         print(f"  MONITOR [{operation_tag}]: Current size ~{current_mb:.1f} MB (at {format_time(current_time - start_time)})")
+                         last_logged_mb = current_mb
+                else:
+                    if last_logged_mb != -999:
+                         print(f"  MONITOR [{operation_tag}]: Project directory '{project_path.name}' not found during size check.")
+                         last_logged_mb = -999
             except Exception as e:
-                # Handle errors during size check without stopping the monitor
-                error_snippet = f"Error reading size: {e}"[:30]
-                update_status(f"[{operation_tag}] {error_snippet}... - {eta_str}".ljust(60))
+                 print(f"  MONITOR [{operation_tag}]: Warning - Error checking size: {e}")
+            last_size_check_time = current_time
+        time.sleep(0.3)
 
-            last_update_time = current_time
-
-        # Sleep briefly to avoid busy-waiting
-        time.sleep(0.5)
-
-    # Final size log when monitor stops
-    final_bytes = get_folder_size(SIMULATION_PROJECT_PATH)
-    final_mb = final_bytes / BYTES_PER_MB
-    print(f"\n[{operation_tag}] Monitor Stopped. Final size: {final_mb:.1f}MB")
+    final_elapsed_time = time.time() - start_time
+    print(f"\n[{operation_tag}] Monitor Stopped. Total Duration: {format_time(final_elapsed_time)}")
+    if project_path:
+        try:
+            if project_path.is_dir():
+                 final_bytes = get_folder_size(project_path)
+                 final_mb = final_bytes / (1024*1024)
+                 print(f"[{operation_tag}] Final project size: ~{final_mb:.1f} MB")
+            else:
+                 print(f"[{operation_tag}] Final project directory not found.")
+        except Exception as e:
+            print(f"[{operation_tag}] Warning - Error getting final size: {e}")
 
 def run_unity_batchmode(exec_method: str, op_name: str, log_file_name: str, timeout: int = 600, extra_args: list = None) -> tuple[bool, Union[str, None]]:
     """
