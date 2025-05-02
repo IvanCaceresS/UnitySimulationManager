@@ -24,6 +24,8 @@ import tiktoken
 import re
 from typing import Union, Tuple, Dict
 import plistlib
+import numpy as np
+from scipy.optimize import curve_fit
 
 AuthenticationError_v0 = openai_error_v0.AuthenticationError
 InvalidRequestError_v0 = openai_error_v0.InvalidRequestError
@@ -118,60 +120,242 @@ BTN_CREATE_TEXT_COLOR = ("#FFFFFF", "#FFFFFF")
 BTN_CLEARSEARCH_FG_COLOR = ("#E53935", "#E53935")
 BTN_CLEARSEARCH_HOVER_COLOR = ("#C62828", "#EF5350")
 BTN_CLEARSEARCH_TEXT_COLOR = ("#FFFFFF", "#FFFFFF")
+
+
+# --- Constantes ---
+UNITY_PRODUCT_NAME = "InitialSetup"  # Nombre fijo del producto a buscar
+LOG_SUBFOLDER = "SimulationLoggerData"
+CSV_FILENAME = "SimulationStats.csv"
+GRAPHICS_SUBFOLDER = "Graphics"
+# ------------------
 # ======================================================
 # Start SimulationGraphics
 # ======================================================
+def find_unity_persistent_path(product_name: str) -> Union[Path, None]: # <--- Usa Union[...]
+    """
+    Busca la ruta a la carpeta del producto ('product_name')
+    dentro de las ubicaciones persistentes estándar de Unity (Application.persistentDataPath).
+    Devuelve la ruta completa (.../CompanyName/ProductName) o None si no se encuentra o hay ambigüedad.
+    """
+    system = platform.system()
+    home = Path.home()
+    search_base: Union[Path, None] = None # <--- Usa Union[...] también aquí
+    potential_paths: list[Path] = []
+
+    # print(f"  [PathFinder] Detectando OS: {system}") # Descomenta para depuración
+
+    try:
+        # 1. Determinar el directorio base donde buscar (raíz de persistentDataPath)
+        if system == "Windows":
+            local_app_data_str = os.getenv('LOCALAPPDATA', '')
+            if local_app_data_str:
+                app_data_parent = Path(local_app_data_str).parent
+                search_base = app_data_parent / 'LocalLow'
+            else:
+                search_base = home / 'AppData' / 'LocalLow' # Fallback
+            # print(f"  [PathFinder] Base de búsqueda (Win): {search_base}")
+        elif system == "Darwin":  # macOS
+            search_base = home / 'Library' / 'Application Support'
+            # print(f"  [PathFinder] Base de búsqueda (Mac): {search_base}")
+        elif system == "Linux":
+            search_base_unity = home / '.config' / 'unity3d'
+            if search_base_unity.is_dir():
+                 search_base = search_base_unity
+            else:
+                 # Alternativa (menos común para Unity puro): XDG_CONFIG_HOME
+                 # config_home = Path(os.getenv('XDG_CONFIG_HOME', home / '.config'))
+                 # search_base = config_home / product_name # O /Company/Product...
+                 print(f"  [PathFinder] Advertencia: No se encontró directorio base estándar de Unity ('{search_base_unity}').")
+                 return None # No se puede buscar sin una base conocida
+            # print(f"  [PathFinder] Base de búsqueda (Linux): {search_base}")
+        else:
+            print(f"  [PathFinder] Error: OS '{system}' no soportado para búsqueda automática.")
+            return None
+
+        if not search_base or not search_base.is_dir():
+            print(f"  [PathFinder] Error: Directorio base '{search_base}' no existe o no es accesible.")
+            return None
+
+        # 2. Iterar sobre las carpetas de 'compañía' (nombre desconocido)
+        # print(f"  [PathFinder] Buscando '{product_name}' en subcarpetas de '{search_base}'...")
+        for company_dir in search_base.iterdir():
+            if company_dir.is_dir():
+                _potential_product_path = company_dir / product_name
+                if _potential_product_path.is_dir():
+                    # print(f"    -> Coincidencia encontrada: {_potential_product_path}")
+                    potential_paths.append(_potential_product_path)
+
+        # 3. Evaluar resultados
+        if len(potential_paths) == 1:
+            found_path = potential_paths[0]
+            # print(f"  [PathFinder] Éxito: Ruta única encontrada: {found_path}")
+            return found_path
+        elif len(potential_paths) == 0:
+            print(f"  [PathFinder] Error: No se encontró la carpeta del producto '{product_name}' bajo '{search_base}'.")
+            print(f"  Asegúrate de que la aplicación Unity ('{product_name}') se haya ejecutado al menos una vez y creado su carpeta de datos.")
+            return None
+        else: # Ambigüedad
+            print(f"  [PathFinder] Error: ¡Ambigüedad! Múltiples rutas encontradas para '{product_name}':")
+            for p in potential_paths: print(f"    - {p}")
+            print(f"  Limpia las instalaciones antiguas o duplicadas.")
+            return None
+
+    except PermissionError:
+        print(f"  [PathFinder] Error de permisos al intentar buscar en '{search_base}'.")
+        return None
+    except Exception as e:
+        print(f"  [PathFinder] Error inesperado durante búsqueda de ruta del producto: {e}")
+        traceback.print_exc()
+        return None
+# === FUNCIÓN AUXILIAR 2: Encontrar Carpeta Específica de la Simulación ===
+def find_simulation_data_path(simulation_name: str) -> Union[Path, None]: # <--- Usa Union[...]
+    """
+    Encuentra la ruta completa a la carpeta de datos para una simulación específica,
+    buscando primero la carpeta base del producto Unity.
+    Devuelve Path(.../SimulationLoggerData/simulation_name) o None si no se encuentra.
+    """
+    # ... (resto del código de la función sin cambios) ...
+    # Asegúrate que las constantes UNITY_PRODUCT_NAME y LOG_SUBFOLDER estén definidas
+    if not simulation_name:
+        print("[find_simulation_data_path] Error: Nombre de simulación vacío proporcionado.")
+        return None
+
+    product_base_path = find_unity_persistent_path(UNITY_PRODUCT_NAME)
+
+    if not product_base_path:
+        print(f"[find_simulation_data_path] No se pudo encontrar la carpeta base del producto '{UNITY_PRODUCT_NAME}' para localizar los datos de '{simulation_name}'.")
+        return None
+
+    simulation_path = product_base_path / LOG_SUBFOLDER / simulation_name
+    return simulation_path
+def exponential_func(x, a, b):
+    """Función exponencial base: y = a * exp(b * x)"""
+    # Usamos np.exp para manejar arrays de numpy correctamente
+    return a * np.exp(b * x)
+
+# === FUNCIÓN SimulationGraphics CORREGIDA (Usa las funciones auxiliares) ===
 def SimulationGraphics(simulation_name):
+    """
+    Genera gráficos para una simulación, localizando los datos CSV dinámicamente
+    llamando a find_simulation_data_path.
+    """
     if not simulation_name:
         print("Error: Se debe proporcionar un nombre de simulación a la función SimulationGraphics.")
+        # Considera usar messagebox si es una aplicación GUI
+        # messagebox.showerror("Error", "No simulation name provided to SimulationGraphics.")
         return
 
-    documents_path = Path.home() / "Documents"
-    simulation_folder = documents_path / "SimulationLoggerData" / simulation_name
+    print(f"\n--- Iniciando Gráficos para Simulación: '{simulation_name}' ---")
 
-    csv_path = simulation_folder / "SimulationStats.csv"
-    output_folder = simulation_folder / "Graphics"
-    output_folder.mkdir(parents=True, exist_ok=True)
+    # --- PASO 1: Localizar la carpeta de datos usando la función auxiliar ---
+    print("Paso 1: Localizando carpeta de datos...")
+    simulation_folder = find_simulation_data_path(simulation_name) # ¡Llamada a la función auxiliar!
 
-    if not csv_path.exists():
-        print(f"El archivo CSV no existe en: {csv_path}")
+    # Verificar si la función auxiliar encontró la ruta
+    if not simulation_folder:
+        print(f"Error Crítico: No se pudo localizar la carpeta de datos para '{simulation_name}'. Abortando generación de gráficos.")
+        # El error específico ya fue impreso por las funciones auxiliares.
+        # Considera usar messagebox si es una aplicación GUI
+        # messagebox.showerror("Error", f"Could not locate data folder for simulation '{simulation_name}'.")
+        return # Salir de la función si no se encontró la carpeta
+
+    print(f"  Carpeta de datos localizada: {simulation_folder}")
+
+    # --- PASO 2: Construir rutas completas para CSV y Gráficos ---
+    # Usar las constantes globales para los nombres de archivo/subcarpeta
+    csv_path = simulation_folder / CSV_FILENAME
+    output_folder = simulation_folder / GRAPHICS_SUBFOLDER
+    print(f"  Ruta CSV esperada: {csv_path}")
+    print(f"  Carpeta para gráficos: {output_folder}")
+
+    # --- PASO 3: Crear carpeta de salida para los gráficos ---
+    try:
+        print(f"Paso 3: Asegurando carpeta de gráficos...")
+        output_folder.mkdir(parents=True, exist_ok=True) # Crea la carpeta si no existe
+        print(f"  Carpeta '{output_folder}' asegurada.")
+    except OSError as e:
+         print(f"  Error Crítico al crear/asegurar carpeta de salida '{output_folder}': {e}. Abortando.")
+         # Considera usar messagebox
+         # messagebox.showerror("Error", f"Could not create output folder:\n{output_folder}\nError: {e}")
+         return
+
+    # --- PASO 4: Verificar y leer el archivo CSV ---
+    print(f"Paso 4: Verificando y leyendo archivo CSV...")
+    if not csv_path.is_file(): # Verificar que existe Y es un archivo
+        print(f"  Error: El archivo CSV no se encontró en la ruta esperada: {csv_path}")
+        # Considera usar messagebox
+        # messagebox.showerror("Error", f"CSV file not found:\n{csv_path}")
         return
 
     try:
-        df = pd.read_csv(csv_path, sep=";", engine="python")
+        # Leer el CSV usando pandas
+        df = pd.read_csv(csv_path, sep=";", engine="python") # sep=";" según tu logger C#
+        if df.empty:
+             print(f"  Error: El archivo CSV '{csv_path}' está vacío.")
+             # Considera usar messagebox
+             # messagebox.showerror("Error", f"The CSV file is empty:\n{csv_path}")
+             return
+        print(f"  Lectura CSV exitosa ({len(df)} filas).")
+    except pd.errors.EmptyDataError:
+         print(f"  Error: El archivo CSV '{csv_path}' está vacío o no contiene datos.")
+         return
     except Exception as e:
-        print(f"Error al leer el archivo CSV ({csv_path}): {e}")
+        print(f"  Error Crítico al leer o parsear el archivo CSV '{csv_path}': {e}")
+        traceback.print_exc() # Imprime detalles del error para depuración
+        # Considera usar messagebox
+        # messagebox.showerror("CSV Read Error", f"Failed to read CSV file:\n{csv_path}\nError: {e}")
         return
 
-    df.columns = df.columns.str.strip()
-
-    if "Timestamp" not in df.columns:
-        print("[Error] La columna 'Timestamp' no se encontró en el CSV.")
-        return
-
-    df = df[df["Timestamp"].astype(str).str.strip() != "0"]
-
-    df["Timestamp"] = df["Timestamp"].astype(str).str.replace(r'\s+', ' ', regex=True)
-
+    # --- PASO 5: Procesamiento de Datos ---
+    print(f"Paso 5: Procesando datos...")
     try:
-        df["Timestamp"] = pd.to_datetime(df["Timestamp"], format="%d-%m-%Y %H:%M:%S", errors="coerce")
+        # Limpiar nombres de columnas (quitar espacios extra)
+        df.columns = df.columns.str.strip()
+
+        # Verificar columna Timestamp (crucial)
+        if "Timestamp" not in df.columns:
+            print("  Error: Columna requerida 'Timestamp' no encontrada en el CSV.")
+            return
+
+        # --- Conversión de Timestamp ---
+        # Convertir a string, limpiar espacios extra, luego a datetime
+        df["Timestamp_str"] = df["Timestamp"].astype(str).str.strip()
+        # Eliminar filas donde el timestamp original sea '0' o vacío
+        df = df[df["Timestamp_str"].str.lower().isin(['0', '']) == False].copy()
+
+        # Intentar convertir al formato esperado
+        df["Timestamp"] = pd.to_datetime(df["Timestamp_str"], format="%d-%m-%Y %H:%M:%S", errors='coerce')
+
+        # Eliminar filas donde la conversión falló (NaT)
+        initial_rows = len(df)
+        df.dropna(subset=["Timestamp"], inplace=True)
+        rows_dropped = initial_rows - len(df)
+        if rows_dropped > 0:
+            print(f"  Advertencia: Se eliminaron {rows_dropped} filas con formato de Timestamp inválido.")
+
+        if df.empty:
+            print("  Error: No quedan datos válidos después de procesar los Timestamps.")
+            return
+
+        # Ordenar por Timestamp (importante para gráficos de tiempo)
+        df.sort_values(by="Timestamp", inplace=True)
+
+        print("  Procesamiento de datos completado.")
+
     except Exception as e:
-        print(f"Error al convertir la columna Timestamp: {e}")
-
-    initial_rows = len(df)
-    df = df.dropna(subset=["Timestamp"])
-    if len(df) < initial_rows:
-         print(f"Advertencia: Se eliminaron {initial_rows - len(df)} filas debido a formato inválido de Timestamp.")
-
-    if df.empty:
-        print("No quedan datos válidos después de procesar el Timestamp.")
+        print(f"  Error durante el procesamiento de datos: {e}")
+        traceback.print_exc()
         return
 
-    known_columns = { # Usar un set para búsquedas más rápidas
-        "Timestamp", "FPS", "RealTime", "SimulatedTime",
-        "DeltaTime", "FrameCount", "Pausado", "Organism count"
-    }
-    organism_columns = [col for col in df.columns if col not in known_columns]
+    # --- PASO 6: Identificación de Columnas de Organismos ---
+    # Columnas conocidas que NO son organismos
+    known_columns = {"Timestamp", "Timestamp_str", "FPS", "RealTime", "SimulatedTime", "DeltaTime", "FrameCount", "Pausado"}
+    organism_columns = sorted([col for col in df.columns if col not in known_columns]) # Ordenar alfabéticamente
+    print(f"  Columnas de organismos identificadas: {organism_columns}")
+
+    # --- PASO 7: Generación de Gráficos ---
+    print(f"Paso 7: Generando gráficos...")
+    plot_generated_count = 0 # Contador de gráficos generados
 
     # --- Gráfico 1: FPS over Time ---
     if "FPS" in df.columns:
@@ -326,33 +510,137 @@ def SimulationGraphics(simulation_name):
 
     # --- Gráfico 8: Organisms per Simulated Time ---
     if "SimulatedTime" in df.columns and organism_columns:
-         # Verificar que SimulatedTime sea numérico
-         if pd.api.types.is_numeric_dtype(df["SimulatedTime"]):
-            plt.figure(figsize=(12, 6))
+        # Verificar que SimulatedTime sea numérico y no esté vacío
+        if pd.api.types.is_numeric_dtype(df["SimulatedTime"]) and not df["SimulatedTime"].isnull().all():
+            plt.figure(figsize=(14, 7)) # Un poco más ancho para la leyenda potentially larga
             plotted_something = False
+            actual_organisms_plotted = [] # Para controlar la leyenda y el título
+
+            # Prepara los datos de tiempo una vez si son válidos
+            time_data_full = df["SimulatedTime"]
+
             for col in organism_columns:
-                # Verificar de nuevo cada columna de organismo
-                if col in df.columns and pd.api.types.is_numeric_dtype(df[col]):
-                    plt.plot(df["SimulatedTime"], df[col], label=col, marker=".", linestyle="-")
-                    plotted_something = True
-                # No imprimir advertencia aquí de nuevo, ya se hizo en gráfico 3
+                # --- INICIO: Condición para saltar 'Organism count' ---
+                if col == "Organism count":
+                    print(f"  Omitiendo columna '{col}' del Gráfico 8 como se solicitó.")
+                    continue # Saltar al siguiente elemento en organism_columns
+                # --- FIN: Condición para saltar 'Organism count' ---
+
+                # Verificar de nuevo cada columna de organismo y que no esté vacía
+                if col in df.columns and pd.api.types.is_numeric_dtype(df[col]) and not df[col].isnull().all():
+
+                    # --- 1. Plotear los datos originales ---
+                    # Filtra NaN para el ploteo inicial también, asegurando consistencia
+                    valid_indices = df[col].notna() & time_data_full.notna()
+                    time_data_clean = time_data_full[valid_indices].values
+                    organism_data_clean = df.loc[valid_indices, col].values
+
+                    # Solo plotear si hay datos válidos después de limpiar NaNs
+                    if len(time_data_clean) > 0:
+                        plt.plot(time_data_clean, organism_data_clean, label=f"{col} (Datos)", marker=".", linestyle="-", alpha=0.7)
+                        plotted_something = True
+                        if col not in actual_organisms_plotted:
+                            actual_organisms_plotted.append(col) # Añadir a la lista de ploteados
+                    else:
+                        print(f"  Advertencia: No hay datos numéricos válidos para '{col}' en el eje Y o 'SimulatedTime' correspondiente.")
+                        continue # Saltar al siguiente organismo si no hay datos válidos
+
+                    # --- 2. Intentar el ajuste exponencial ---
+                    # Se necesitan al menos 2 puntos para intentar un ajuste
+                    if len(time_data_clean) >= 2:
+                        try:
+                            # Estimación inicial: a=primer valor > 0, b=pequeño valor positivo
+                            initial_a = organism_data_clean[0] if organism_data_clean[0] > 0 else 1.0
+                            if np.all(organism_data_clean == organism_data_clean[0]):
+                                initial_b = 0.0
+                            elif len(time_data_clean) > 1 and organism_data_clean[-1] > initial_a and time_data_clean[-1] > time_data_clean[0]:
+                                # Evitar división por cero si los tiempos son iguales
+                                time_diff = time_data_clean[-1] - time_data_clean[0]
+                                if time_diff > 1e-9: # Un umbral pequeño para evitar división por cero
+                                    initial_b = np.log(organism_data_clean[-1] / initial_a) / time_diff
+                                else:
+                                    initial_b = 0.0 # Si los tiempos son casi iguales, b es 0
+                            else:
+                                initial_b = 0.01 # Suposición por defecto
+
+                            # Asegurarse de que b no sea NaN o Inf
+                            if not np.isfinite(initial_b):
+                                initial_b = 0.01
+
+                            p0 = [initial_a, initial_b]
+                            bounds = ([0, -np.inf], [np.inf, np.inf])
+
+                            # Realizar el ajuste de curva
+                            params, covariance = curve_fit(
+                                exponential_func,
+                                time_data_clean,
+                                organism_data_clean,
+                                p0=p0,
+                                bounds=bounds,
+                                maxfev=10000
+                            )
+                            a_fit, b_fit = params
+
+                            # Generar puntos para la curva ajustada sobre el rango de tiempo limpio
+                            time_fit = np.linspace(time_data_clean.min(), time_data_clean.max(), 100)
+                            organism_fit = exponential_func(time_fit, a_fit, b_fit)
+
+                            # --- 3. Plotear la curva ajustada ---
+                            label_fit = f"{col} (Ajuste Exp: a={a_fit:.2f}, b={b_fit:.3f})"
+                            plt.plot(time_fit, organism_fit, label=label_fit, linestyle="--")
+
+                        except RuntimeError:
+                            print(f"  Advertencia: No se pudo ajustar la curva exponencial para '{col}'. La optimización no convergió.")
+                        except ValueError as ve:
+                            print(f"  Advertencia: Error de valor al intentar ajustar '{col}'. ¿Datos incompatibles? {ve}")
+                        except Exception as e:
+                            print(f"  Advertencia: Error inesperado durante el ajuste de curva para '{col}': {e}")
+                    else:
+                        print(f"  Advertencia: No hay suficientes puntos de datos ({len(time_data_clean)}) para ajustar curva a '{col}'.")
+
 
             if plotted_something:
-                plt.title(f"Organism Count over Simulated Time ({simulation_name})")
+                plt.title(f"Specific Organism Count & Exponential Fit over Simulated Time ({simulation_name})") # Título ajustado
                 plt.xlabel("Simulated Time (s)")
                 plt.ylabel("Organism Count")
-                plt.legend()
-                plt.grid(True, linestyle='--', alpha=0.6)
-                plt.tight_layout()
-                try:
-                    plt.savefig(str(output_folder / "organisms_vs_simulated_time.png"))
-                except Exception as e:
-                    print(f"Error al guardar organisms_vs_simulated_time.png: {e}")
-            plt.close()
-         else:
-             print("Columna 'SimulatedTime' no es numérica, omitiendo gráfico Organisms vs Simulated Time.")
+                # Colocar leyenda fuera del gráfico si hay muchas líneas
+                if len(actual_organisms_plotted) > 2: # Si hay más de 2 organismos (4 líneas en total con los ajustes)
+                    plt.legend(bbox_to_anchor=(1.04, 1), loc="upper left")
+                    plt.tight_layout(rect=[0, 0, 0.85, 1]) # Ajustar layout para dejar espacio a la leyenda
+                else:
+                    plt.legend()
+                    plt.tight_layout() # Ajuste normal si la leyenda cabe dentro
 
-    print(f"SimulationGraphics: Los gráficos para '{simulation_name}' se han generado (o intentado generar) y guardado en: {output_folder}")
+                plt.grid(True, linestyle='--', alpha=0.6)
+
+                try:
+                    # Mantenemos el nombre, pero ahora solo contiene los organismos específicos
+                    save_path = output_folder / "organisms_vs_simulated_time_fit.png"
+                    plt.savefig(str(save_path))
+                    print(f"  Gráfico 'organisms_vs_simulated_time_fit.png' guardado (excluyendo 'Organism count').")
+                except Exception as e:
+                    print(f"  Error al guardar organisms_vs_simulated_time_fit.png: {e}")
+            else:
+                print("  No se graficó nada para Organisms vs Simulated Time (sin datos válidos o solo se encontró 'Organism count').")
+
+            plt.close() # Cerrar la figura para liberar memoria
+        elif "SimulatedTime" in df.columns and df["SimulatedTime"].isnull().all():
+            print("Columna 'SimulatedTime' existe pero todos sus valores son nulos, omitiendo gráfico Organisms vs Simulated Time.")
+        else: # Si la columna NO es numérica
+            print("Columna 'SimulatedTime' no es numérica, omitiendo gráfico Organisms vs Simulated Time.")
+    elif not organism_columns:
+        print("No se encontraron columnas de organismos, omitiendo gráfico Organisms vs Simulated Time.")
+    else: # Si 'SimulatedTime' no está en las columnas
+        print("Columna 'SimulatedTime' no encontrada, omitiendo gráfico Organisms vs Simulated Time.")
+
+    # --- Mensaje Final ---
+    print(f"\n--- Proceso de generación de gráficos completado para '{simulation_name}' ---")
+    if plot_generated_count > 0:
+        print(f"Se generaron {plot_generated_count} gráficos en: {output_folder}")
+    else:
+        print("No se generó ningún gráfico útil debido a datos faltantes o problemas.")
+    # Puedes añadir aquí la llamada a open_graphs_folder(simulation_name) si quieres que se abra automáticamente
+    # open_graphs_folder(simulation_name)
 # ======================================================
 # End SimulationGraphics
 # ======================================================
@@ -1019,13 +1307,48 @@ def ensure_unity_closed():
         print(f"Unity close check took {time.time()-t_start:.2f}s")
 
 def open_graphs_folder(simulation_name):
+    """
+    Abre la carpeta 'Graphics' dentro de la carpeta de datos de la simulación,
+    localizada dinámicamente usando find_simulation_data_path.
+    """
+    if not simulation_name:
+        messagebox.showerror("Error", "No se proporcionó nombre de simulación para abrir la carpeta.")
+        return
+
+    print(f"Intentando abrir carpeta de gráficos para: '{simulation_name}'")
+    # Llama a la función auxiliar para encontrar la ruta base de datos
+    simulation_data_dir = find_simulation_data_path(simulation_name)
+
+    if not simulation_data_dir:
+        # find_simulation_data_path ya debería haber impreso un error más detallado
+        messagebox.showerror("Error", f"No se pudo encontrar el directorio de datos para la simulación '{simulation_name}'.\nNo se puede abrir la carpeta de gráficos.")
+        return
+
+    # Construye la ruta a la carpeta específica de gráficos
+    graphs_folder_path = simulation_data_dir / GRAPHICS_SUBFOLDER
+
     try:
-        fldr = Path.home()/"Documents"/"SimulationLoggerData"/simulation_name/"Graphics"
-        fldr.mkdir(parents=True, exist_ok=True)
-        if platform.system() == "Windows": os.startfile(str(fldr))
-        elif platform.system() == "Darwin": subprocess.Popen(["open", str(fldr)])
-        else: subprocess.Popen(["xdg-open", str(fldr)])
-    except Exception as e: messagebox.showerror("Error", f"Could not open graphs folder '{fldr}':\n{e}")
+        # Asegurarse de que la carpeta exista antes de intentar abrirla
+        print(f"  Asegurando existencia de: {graphs_folder_path}")
+        graphs_folder_path.mkdir(parents=True, exist_ok=True) # Crea si no existe
+
+        print(f"  Abriendo carpeta: {graphs_folder_path}")
+        # Abrir la carpeta usando el método apropiado para el sistema operativo
+        if platform.system() == "Windows":
+            os.startfile(str(graphs_folder_path))
+        elif platform.system() == "Darwin": # macOS
+            subprocess.Popen(["open", str(graphs_folder_path)])
+        else: # Linux y otros (asume xdg-open)
+            subprocess.Popen(["xdg-open", str(graphs_folder_path)])
+
+    except FileNotFoundError:
+         # Error si el comando 'open' o 'xdg-open' no se encuentra en el sistema
+         messagebox.showerror("Error", f"No se pudo encontrar el comando del sistema ('{ 'open' if platform.system()=='Darwin' else 'xdg-open' }') para abrir la carpeta en este OS ({platform.system()}).")
+    except Exception as e:
+         # Otros errores (permisos, etc.)
+         messagebox.showerror("Error", f"No se pudo abrir la carpeta de gráficos:\n{graphs_folder_path}\n\nError: {e}")
+         traceback.print_exc() # Muestra más detalles del error en la consola
+
 
 def get_folder_size(path):
     total = 0
@@ -1136,81 +1459,148 @@ def load_simulation(sim_name):
     return True
 
 def delete_simulation(sim_name):
+    """
+    Elimina una simulación:
+    1. Pide confirmación.
+    2. Elimina el archivo de estado si corresponde.
+    3. Elimina el directorio de configuración/metadatos local (SIMULATIONS_DIR/sim_name).
+    4. Elimina el directorio de datos de Unity (usando find_simulation_data_path).
+    5. Actualiza las estructuras de datos internas y la UI.
+    """
+    if not sim_name:
+        messagebox.showerror("Error", "No simulation name provided for deletion.")
+        return
+
+    # --- 1. Confirmación ---
     confirm = messagebox.askyesno(
-        "Confirm Deletion",
-        f"Permanently delete '{sim_name}' and all associated data (logs, graphs)?\n\nThis action cannot be undone.",
+        "Confirmar Eliminación",
+        f"¿Eliminar permanentemente la simulación '{sim_name}' y TODOS sus datos asociados (registros, gráficos, configuraciones)?\n\n¡Esta acción no se puede deshacer!",
         icon='warning'
     )
     if not confirm:
-        update_status("Deletion cancelled.")
+        if callable(globals().get('update_status')): update_status("Eliminación cancelada.")
+        print(f"Deletion of '{sim_name}' cancelled by user.")
         return
 
-    update_status(f"Deleting '{sim_name}'...")
-    errs = False
-    global last_simulation_loaded, all_simulations_data
+    if callable(globals().get('update_status')): update_status(f"Eliminando '{sim_name}'...")
+    print(f"--- Iniciando eliminación de '{sim_name}' ---")
+    errs = False # Bandera para rastrear si ocurrió algún error
+    global last_simulation_loaded, all_simulations_data # Asegurar acceso si son globales
 
-    # --- Manejo del archivo de estado ---
-    loaded_sim_path = SIMULATION_LOADED_FILE
-    if loaded_sim_path and os.path.exists(loaded_sim_path):
+    # --- 2. Manejo del archivo de estado (Last Loaded) ---
+    # Asume que SIMULATION_LOADED_FILE es una variable global/constante de tipo Path
+    if 'SIMULATION_LOADED_FILE' in globals() and SIMULATION_LOADED_FILE.exists():
         try:
-            loaded = read_last_loaded_simulation_name()
-            if loaded == sim_name:
-                os.remove(loaded_sim_path)
-                print(f"State file '{loaded_sim_path}' removed.")
-                if last_simulation_loaded == sim_name:
+            # Asume que read_last_loaded_simulation_name() lee este archivo
+            loaded_name = read_last_loaded_simulation_name()
+            if loaded_name == sim_name:
+                SIMULATION_LOADED_FILE.unlink() # Elimina el archivo
+                print(f"  Archivo de estado '{SIMULATION_LOADED_FILE}' eliminado porque contenía '{sim_name}'.")
+                # Actualizar la variable global si coincide
+                if 'last_simulation_loaded' in globals() and last_simulation_loaded == sim_name:
                     last_simulation_loaded = None
-            elif last_simulation_loaded == sim_name:
-                 last_simulation_loaded = None
         except Exception as e:
-            print(f"Warn: Could not read or remove state file '{loaded_sim_path}': {e}")
-    elif last_simulation_loaded == sim_name:
+            print(f"  Advertencia: No se pudo leer o eliminar el archivo de estado '{SIMULATION_LOADED_FILE}': {e}")
+            errs = True # Considerar esto un error leve
+    # Asegurar que la variable global se limpia incluso si el archivo no existía
+    elif 'last_simulation_loaded' in globals() and last_simulation_loaded == sim_name:
          last_simulation_loaded = None
 
-    # --- Eliminación del directorio de simulación ---
-    sim_p = os.path.join(SIMULATIONS_DIR, sim_name)
-    if os.path.exists(sim_p):
-        try:
-            shutil.rmtree(sim_p)
-            print(f"Simulation directory '{sim_p}' removed.")
-        except PermissionError as e:
-             messagebox.showerror("Error", f"Permission denied deleting simulation folder:\n{sim_p}\n{e}")
-             errs = True
-        except OSError as e:
-             messagebox.showerror("Error", f"Could not delete simulation folder:\n{sim_p}\n{e}")
-             errs = True
-        except Exception as e:
-             messagebox.showerror("Error", f"An unexpected error occurred deleting simulation folder:\n{sim_p}\n{e}")
-             errs = True
+    # --- 3. Eliminación del directorio de simulación LOCAL ---
+    # Este es el directorio que TÚ manejas, no el de Unity.
+    # Asume que SIMULATIONS_DIR es una variable global/constante de tipo Path
+    if 'SIMULATIONS_DIR' in globals():
+        sim_p = SIMULATIONS_DIR / sim_name # Construir ruta usando Pathlib
+        print(f"  Intentando eliminar directorio de configuración local: {sim_p}")
+        if sim_p.exists():
+            if sim_p.is_dir():
+                try:
+                    shutil.rmtree(sim_p)
+                    print(f"    Directorio de configuración local '{sim_p}' eliminado.")
+                except PermissionError as e:
+                    messagebox.showerror("Error de Permiso", f"Permiso denegado al eliminar la carpeta de configuración local:\n{sim_p}\n{e}")
+                    errs = True
+                except OSError as e:
+                    messagebox.showerror("Error del Sistema", f"No se pudo eliminar la carpeta de configuración local (¿en uso?):\n{sim_p}\n{e}")
+                    errs = True
+                except Exception as e:
+                    messagebox.showerror("Error Inesperado", f"Error inesperado al eliminar la carpeta de configuración local:\n{sim_p}\n{e}")
+                    traceback.print_exc()
+                    errs = True
+            else:
+                print(f"  Advertencia: Se esperaba un directorio en '{sim_p}', pero se encontró un archivo. Intentando eliminar archivo...")
+                try:
+                    sim_p.unlink() # Intentar borrar como archivo
+                except Exception as e:
+                     print(f"  Error al eliminar archivo inesperado en '{sim_p}': {e}")
+                     errs = True
+        else:
+            print(f"  Directorio de configuración local '{sim_p}' no encontrado (nada que eliminar).")
+    else:
+        print("  Advertencia: La constante SIMULATIONS_DIR no está definida. Omitiendo eliminación de directorio local.")
 
-    # --- Eliminación del directorio de datos ---
-    try:
-        data_p = Path.home() / "Documents" / "SimulationLoggerData" / sim_name
+
+    # --- 4. Eliminación del directorio de DATOS (Unity - persistentDataPath) ---
+    print(f"  Intentando eliminar directorio de datos de Unity para '{sim_name}'...")
+    # ¡Usa la función auxiliar para encontrar la ruta correcta!
+    data_p = find_simulation_data_path(sim_name)
+
+    if data_p is None:
+        # find_simulation_data_path ya imprimió un error detallado
+        print(f"  Error: No se pudo determinar la ruta del directorio de datos de Unity para '{sim_name}'. No se puede eliminar.")
+        # Podrías mostrar un messagebox aquí si lo consideras crítico
+        # messagebox.showwarning("Advertencia", f"No se pudo encontrar la carpeta de datos generada por Unity para '{sim_name}'. Puede que ya no existiera o hubo un problema al buscarla.")
+        errs = True # Marcar como error porque no se pudo completar la acción esperada
+    elif data_p.exists():
         if data_p.is_dir():
             try:
                 shutil.rmtree(data_p)
-                print(f"Data directory '{data_p}' removed.")
+                print(f"    Directorio de datos de Unity '{data_p}' eliminado.")
             except PermissionError as e:
-                messagebox.showerror("Error", f"Permission denied deleting data folder:\n{data_p}\n{e}")
+                messagebox.showerror("Error de Permiso", f"Permiso denegado al eliminar la carpeta de datos de Unity:\n{data_p}\n{e}")
                 errs = True
             except OSError as e:
-                 messagebox.showerror("Error", f"Could not delete data folder:\n{data_p}\n{e}")
-                 errs = True
-            except Exception as e:
-                messagebox.showerror("Error", f"An unexpected error occurred deleting data folder:\n{data_p}\n{e}")
+                messagebox.showerror("Error del Sistema", f"No se pudo eliminar la carpeta de datos de Unity (¿en uso?):\n{data_p}\n{e}")
                 errs = True
-    except Exception as e:
-         print(f"Warn: Could not determine or access data directory path: {e}")
-
-    # --- Actualizar estructura de datos interna ---
-    all_simulations_data = [s for s in all_simulations_data if s.get('name') != sim_name]
-
-    # --- Actualización final de estado y UI ---
-    if errs:
-        update_status(f"Deletion of '{sim_name}' completed with errors.")
+            except Exception as e:
+                messagebox.showerror("Error Inesperado", f"Error inesperado al eliminar la carpeta de datos de Unity:\n{data_p}\n{e}")
+                traceback.print_exc()
+                errs = True
+        else:
+            # Esto sería raro si find_simulation_data_path funcionó, pero por seguridad...
+            print(f"  Advertencia: Se esperaba un directorio en '{data_p}', pero se encontró un archivo. No se eliminará.")
+            errs = True
     else:
-        update_status(f"Deletion of '{sim_name}' successful.")
+        print(f"  Directorio de datos de Unity '{data_p}' no encontrado (nada que eliminar).")
 
-    populate_simulations()
+    # --- 5. Actualizar estructura de datos interna ---
+    # Asume que all_simulations_data es una lista de diccionarios/objetos
+    if 'all_simulations_data' in globals():
+        initial_count = len(all_simulations_data)
+        all_simulations_data = [s for s in all_simulations_data if isinstance(s, dict) and s.get('name') != sim_name]
+        if len(all_simulations_data) < initial_count:
+             print(f"  Entrada para '{sim_name}' eliminada de la lista interna.")
+        else:
+             print(f"  Advertencia: No se encontró '{sim_name}' en la lista interna 'all_simulations_data'.")
+
+    # --- 6. Actualización final de estado y UI ---
+    print(f"--- Fin de eliminación de '{sim_name}' ---")
+    final_message = f"Eliminación de '{sim_name}' completada"
+    if errs:
+        final_message += " con errores."
+        print("  Hubo errores durante el proceso de eliminación.")
+    else:
+        final_message += " exitosamente."
+        print("  Eliminación completada sin errores reportados.")
+
+    if callable(globals().get('update_status')): update_status(final_message)
+
+    # Llama a la función que refresca la lista de simulaciones en la UI
+    if callable(globals().get('populate_simulations')):
+        print("  Refrescando lista de simulaciones en la UI...")
+        populate_simulations()
+    else:
+        print("  Advertencia: Función 'populate_simulations' no encontrada para refrescar la UI.")
 
 
 # ======================================================
@@ -1688,47 +2078,89 @@ def on_show_graphs_thread():
 
 def show_graphs_logic(sim_name):
     """
-    Genera y muestra los gráficos para la simulación dada llamando
-    directamente a la función SimulationGraphics definida localmente.
+    Genera y muestra los gráficos para la simulación dada, localizando los datos
+    dinámicamente y llamando a las funciones SimulationGraphics y open_graphs_folder.
     """
-    try:
-        data_dir = Path.home() / "Documents" / "SimulationLoggerData" / sim_name
-        csv_path = data_dir / "SimulationStats.csv"
-        graphs_dir = data_dir / "Graphics" 
+    # Asumiendo que tienes funciones 'update_status' y 'enable_all_interactions' definidas globalmente o accesibles
+    # global main_window # Descomenta si main_window es global y necesario en finally
 
-        if not csv_path.exists():
-            messagebox.showerror("Data Not Found",
-                                 f"CSV 'SimulationStats.csv' for simulation '{sim_name}' not found in:\n{data_dir}")
-            update_status(f"Error: CSV data missing for '{sim_name}'.")
+    if not sim_name:
+        messagebox.showerror("Error", "No se seleccionó ninguna simulación para mostrar gráficos.")
+        if callable(globals().get('update_status')): update_status("Error: No simulation selected.")
+        return
+
+    # Asegúrate de que las funciones auxiliares estén disponibles
+    if not callable(globals().get('find_simulation_data_path')) or \
+       not callable(globals().get('SimulationGraphics')) or \
+       not callable(globals().get('open_graphs_folder')):
+        messagebox.showerror("Error Interno", "Funciones necesarias (find_simulation_data_path, SimulationGraphics, open_graphs_folder) no definidas.")
+        return
+
+    try:
+        if callable(globals().get('update_status')): update_status(f"Localizando datos para '{sim_name}'...")
+        print(f"--- Iniciando lógica de mostrar gráficos para: '{sim_name}' ---")
+
+        # 1. Encontrar la ruta de datos usando la función auxiliar
+        simulation_data_dir = find_simulation_data_path(sim_name)
+
+        if not simulation_data_dir:
+            # El mensaje de error ya se mostró desde la función auxiliar o find_simulation_data_path
+            messagebox.showerror("Datos no Encontrados",
+                                 f"No se pudo localizar el directorio de datos para la simulación '{sim_name}'.\nNo se pueden generar ni mostrar gráficos.")
+            if callable(globals().get('update_status')): update_status(f"Error: Directorio de datos no encontrado para '{sim_name}'.")
             return
 
-        graphs_dir.mkdir(parents=True, exist_ok=True)
+        print(f"  Directorio de datos encontrado: {simulation_data_dir}")
+        # Construir rutas esperadas dentro del directorio de datos
+        csv_path = simulation_data_dir / CSV_FILENAME
+        graphs_dir = simulation_data_dir / GRAPHICS_SUBFOLDER # Necesario para open_graphs_folder
 
-        update_status(f"Generating graphs for '{sim_name}'...")
+        # 2. Verificar si el archivo CSV existe (necesario para generar gráficos)
+        if not csv_path.is_file(): # Usar is_file() es más específico que exists()
+            messagebox.showerror("Datos Faltantes",
+                                 f"El archivo CSV '{CSV_FILENAME}' para la simulación '{sim_name}' no se encontró en:\n{simulation_data_dir}\n\nNo se pueden generar los gráficos.")
+            if callable(globals().get('update_status')): update_status(f"Error: Archivo CSV faltante para '{sim_name}'.")
+            return
+
+        # 3. Llamar a SimulationGraphics (que ahora también usa find_simulation_data_path)
+        if callable(globals().get('update_status')): update_status(f"Generando gráficos para '{sim_name}'...")
+        print(f"  Llamando a SimulationGraphics para '{sim_name}'...")
+        # --- Ejecución de la generación de gráficos ---
         SimulationGraphics(sim_name)
+        # --------------------------------------------
+        # SimulationGraphics manejará sus propios errores internos y mensajes
 
-        update_status(f"Graph generation for '{sim_name}' completed.")
-        print(f"Opening graphs folder: {graphs_dir}")
-        open_graphs_folder(sim_name)
+        # 4. Si SimulationGraphics no abortó (o no lanzó una excepción que saliera de aquí), intentar abrir la carpeta
+        if callable(globals().get('update_status')): update_status(f"Generación intentada. Abriendo carpeta de gráficos para '{sim_name}'...")
+        print(f"  Llamando a open_graphs_folder para '{sim_name}'...")
+        open_graphs_folder(sim_name) # Usa la misma lógica para encontrar la carpeta
+
+        if callable(globals().get('update_status')): update_status(f"Proceso completado para '{sim_name}'.")
 
     except FileNotFoundError as e:
-        messagebox.showerror("File Not Found Error", f"File not found during graph generation:\n{e}")
-        update_status(f"Error: File not found while generating graphs for '{sim_name}'.")
-        print(f"Graph generation FileNotFoundError: {e}")
+        # Error menos probable ahora, pero podría ocurrir por otras razones
+        messagebox.showerror("Error de Archivo", f"No se encontró un archivo necesario durante el proceso:\n{e}")
+        if callable(globals().get('update_status')): update_status(f"Error: Archivo no encontrado procesando '{sim_name}'.")
+        print(f"show_graphs_logic - FileNotFoundError: {e}")
         traceback.print_exc()
     except Exception as e:
-        messagebox.showerror("Graph Error", f"An error occurred while generating graphs for '{sim_name}':\n{type(e).__name__}: {e}")
-        update_status(f"Error generating graphs for '{sim_name}'.")
-        print(f"Graph generation exception: {e}")
+        # Captura cualquier otro error inesperado durante la lógica
+        messagebox.showerror("Error Inesperado", f"Ocurrió un error inesperado al procesar los gráficos para '{sim_name}':\n{type(e).__name__}: {e}")
+        if callable(globals().get('update_status')): update_status(f"Error procesando gráficos para '{sim_name}'.")
+        print(f"show_graphs_logic - Exception: {e}")
         traceback.print_exc()
     finally:
-        if 'main_window' in globals() and hasattr(main_window, 'after'):
-             main_window.after(0, enable_all_interactions)
-        else:
-             try:
-                 enable_all_interactions()
-             except NameError:
-                 print("Advertencia: 'main_window' o 'enable_all_interactions' no definidas correctamente.")
+        # Código para reactivar la interfaz de usuario (asegúrate de que existan)
+        try:
+            if 'main_window' in globals() and main_window is not None and hasattr(main_window, 'after'):
+                 # Usar after(0, ...) para asegurar que se ejecute en el hilo principal de Tkinter
+                 main_window.after(0, globals().get('enable_all_interactions'))
+            elif callable(globals().get('enable_all_interactions')):
+                 globals().get('enable_all_interactions')() # Llamar directamente si no hay main_window.after
+        except NameError:
+            print("Advertencia: 'main_window' o 'enable_all_interactions' no están definidas globalmente para reactivar la UI.")
+        except Exception as e:
+            print(f"Error en el bloque finally al intentar reactivar la UI: {e}")
 
 def on_create_simulation():
     global is_build_running

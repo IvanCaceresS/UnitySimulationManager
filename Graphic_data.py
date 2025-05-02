@@ -1,8 +1,8 @@
 import pandas as pd
 import numpy as np
-import argparse
+# import argparse # Ya no se necesita para la ruta del archivo
 import os
-import sys
+import sys # Mantenido por si se quiere reintroducir argparse o para print_help
 
 def calculate_doubling_time_for_column(filepath, count_column_name, min_initial_count=2):
     """
@@ -31,7 +31,8 @@ def calculate_doubling_time_for_column(filepath, count_column_name, min_initial_
         return None, None
 
     try:
-        df = pd.read_csv(filepath, sep=';', decimal='.')
+        # Asegúrate de que el separador y el decimal sean correctos para tu archivo CSV
+        df = pd.read_csv(filepath, sep=';', decimal='.') 
         print(f"Archivo leído. {len(df)} filas encontradas.")
     except pd.errors.EmptyDataError:
         print("Error: El archivo CSV está vacío.")
@@ -52,12 +53,10 @@ def calculate_doubling_time_for_column(filepath, count_column_name, min_initial_
     try:
         # Convertir columnas a tipos numéricos
         df['SimulatedTime'] = pd.to_numeric(df['SimulatedTime'], errors='coerce', downcast='float')
-        # *** Aplicar a la columna especificada ***
         df[count_column_name] = pd.to_numeric(df[count_column_name], errors='coerce', downcast='integer')
 
         # Eliminar filas donde las conversiones numéricas fallaron
         rows_before = len(df)
-        # *** Usar la columna especificada en dropna ***
         df.dropna(subset=['SimulatedTime', count_column_name], inplace=True)
         rows_after = len(df)
         if rows_before > rows_after:
@@ -67,13 +66,18 @@ def calculate_doubling_time_for_column(filepath, count_column_name, min_initial_
             print(f"Error: No quedan datos válidos para '{count_column_name}' después de la limpieza numérica.")
             return None, None
 
-        # Filtrar filas pausadas
-        df['Pausado'] = df['Pausado'].astype(str)
-        rows_before = len(df)
-        df_active = df[df['Pausado'].str.strip().str.upper() == 'NO'].copy()
-        rows_after = len(df_active)
-        if rows_before > rows_after:
-             print(f"Filtrando datos pausados: {rows_before - rows_after} filas eliminadas.")
+        # Filtrar filas pausadas (asegurarse que 'Pausado' existe y es interpretable)
+        if 'Pausado' in df.columns:
+             df['Pausado'] = df['Pausado'].astype(str)
+             rows_before = len(df)
+             df_active = df[df['Pausado'].str.strip().str.upper() == 'NO'].copy()
+             rows_after = len(df_active)
+             if rows_before > rows_after:
+                 print(f"Filtrando datos pausados: {rows_before - rows_after} filas eliminadas.")
+        else:
+             print("Advertencia: No se encontró la columna 'Pausado'. Se asumirá que todos los datos son activos.")
+             df_active = df.copy() # Usar todos los datos si 'Pausado' no existe
+
 
         if df_active.empty:
             print(f"Error: No hay datos activos registrados para '{count_column_name}'.")
@@ -87,6 +91,9 @@ def calculate_doubling_time_for_column(filepath, count_column_name, min_initial_
         if rows_before > rows_after:
             print(f"Advertencia: Se eliminaron {rows_before - rows_after} filas con 'SimulatedTime' duplicado.")
 
+    except KeyError as e:
+        print(f"Error: Falta la columna '{e}' necesaria para la limpieza o filtrado.")
+        return None, None
     except Exception as e:
         print(f"Error durante la limpieza o conversión de datos para '{count_column_name}': {e}")
         return None, None
@@ -99,11 +106,9 @@ def calculate_doubling_time_for_column(filepath, count_column_name, min_initial_
     doubling_times = []
     current_index = -1
 
-    # *** Usar la columna especificada para encontrar el inicio ***
     first_valid_indices = df_active[df_active[count_column_name] >= min_initial_count].index
     if not first_valid_indices.empty:
         current_index = first_valid_indices[0]
-        # *** Usar la columna especificada en el print ***
         print(f"Iniciando búsqueda de duplicaciones para '{count_column_name}' desde T={df_active.loc[current_index, 'SimulatedTime']:.2f} con Count={df_active.loc[current_index, count_column_name]}")
     else:
         print(f"No se encontraron datos para '{count_column_name}' con conteo >= {min_initial_count}. No se puede calcular.")
@@ -111,40 +116,42 @@ def calculate_doubling_time_for_column(filepath, count_column_name, min_initial_
 
     while current_index is not None and current_index in df_active.index:
         current_time = df_active.loc[current_index, 'SimulatedTime']
-        # *** Usar la columna especificada ***
         current_count = df_active.loc[current_index, count_column_name]
 
         if current_count <= 0:
              print(f"Advertencia: Conteo no positivo ({current_count}) encontrado para '{count_column_name}' en T {current_time:.2f}. Deteniendo búsqueda.")
-             break
+             break # Salir del bucle si el conteo es cero o negativo
 
         target_count = current_count * 2
 
-        # *** Usar la columna especificada para buscar duplicación ***
         future_data = df_active.loc[df_active.index > current_index]
         doubled_indices = future_data[future_data[count_column_name] >= target_count].index
 
         if not doubled_indices.empty:
             next_index = doubled_indices[0]
             next_time = df_active.loc[next_index, 'SimulatedTime']
-            # *** Usar la columna especificada ***
             next_count = df_active.loc[next_index, count_column_name]
             time_elapsed = next_time - current_time
 
-            if time_elapsed > 1e-9:
+            # Evitar división por cero o tiempos de duplicación insignificantes
+            if time_elapsed > 1e-9: # Un umbral pequeño para considerar un tiempo válido
                 doubling_times.append(time_elapsed)
-                # *** Usar la columna especificada en el print ***
                 print(f"  Duplicación ('{count_column_name}') encontrada: De {current_count} (T={current_time:.2f}) a {next_count} (T={next_time:.2f}). Tiempo: {time_elapsed:.2f}")
-                current_index = next_index
+                current_index = next_index # Avanzar al índice donde se duplicó
             else:
-                 print(f"  Advertencia: Tiempo de duplicación no positivo ({time_elapsed:.4f}) para '{count_column_name}' de T={current_time:.2f} a T={next_time:.2f}. Saltando intervalo.")
-                 indices_after_current = df_active.index[df_active.index > current_index]
-                 current_index = indices_after_current[0] if not indices_after_current.empty else None
+                # Si el tiempo es cero o negativo, buscar el *siguiente* punto de datos para continuar
+                print(f"  Advertencia: Tiempo de duplicación no positivo o muy pequeño ({time_elapsed:.4f}) para '{count_column_name}' de T={current_time:.2f} a T={next_time:.2f}. Buscando siguiente punto.")
+                # Encontrar el índice inmediatamente posterior al actual para evitar bucles infinitos
+                indices_after_current = df_active.index[df_active.index > current_index]
+                if not indices_after_current.empty:
+                    current_index = indices_after_current[0] 
+                else:
+                    print("No hay más puntos de datos después del evento de tiempo no positivo.")
+                    current_index = None # Terminar si no hay más datos
         else:
-            # *** Usar la columna especificada en el print ***
-            print(f"No se encontró duplicación futura para '{count_column_name}' con conteo {current_count} (T={current_time:.2f}).")
-            current_index = None
-            break
+            print(f"No se encontró duplicación futura para '{count_column_name}' con conteo {current_count} (T={current_time:.2f}). Fin del análisis para esta columna.")
+            current_index = None # Terminar la búsqueda para esta columna
+            # No se usa 'break' aquí explícitamente, current_index = None detiene el while
 
     # --- Calcular y Devolver el Promedio ---
     if doubling_times:
@@ -157,39 +164,84 @@ def calculate_doubling_time_for_column(filepath, count_column_name, min_initial_
         print(f"\nNo se pudo calcular ningún tiempo de duplicación para '{count_column_name}'.")
         return None, None
 
-# --- Ejecución del Script desde Línea de Comandos ---
+# --- Ejecución del Script ---
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description='Calcula tiempos de duplicación promedio desde SimulationStats.csv para columnas específicas.')
-    parser.add_argument('filepath', type=str, help='Ruta al archivo SimulationStats.csv')
-    parser.add_argument('--min_count', type=int, default=2, help='Conteo mínimo inicial para empezar a calcular (default: 2)')
 
-    if len(sys.argv) == 1:
-        parser.print_help(sys.stderr)
-        sys.exit(1)
+    # --- PARÁMETROS DE CONFIGURACIÓN ---
+    # 1. Ruta al archivo CSV (Modifica esta línea con tu ruta real)
+    #    Asegúrate de usar dobles barras invertidas '\\' o una barra normal '/'
+    csv_filepath = r"C:\Users\icace\Documents\SimulationLoggerData\Escenario 1\SimulationStats.csv"
+    # Ejemplo alternativo con barras normales:
+    # csv_filepath = "C:/Users/icace/Documents/SimulationLoggerData/Escenario 1/SimulationStats.csv"
 
-    args = parser.parse_args()
+    # 2. Tiempos de duplicación esperados/solicitados para cada organismo (en las mismas unidades que 'SimulatedTime')
+    #    El nombre (clave) debe coincidir EXACTAMENTE con el encabezado de la columna en el CSV.
+    #    Si el valor es 0, el organismo NO será analizado.
+    target_doubling_times = {
+        'EColi': 20.0,         # Ejemplo: Se espera que EColi se duplique cada 20 unidades de tiempo
+        'SCerevisiae': 90.0,   # Ejemplo: Se espera que SCerevisiae se duplique cada 90 unidades de tiempo
+        'Organism count': 0,   # Ejemplo: No analizar la columna 'Organism count' (quizás es un total)
+        'OtroOrganismo': 45.5, # Ejemplo: Analizar 'OtroOrganismo' si existe en el CSV
+        'NoAnalizar': 0        # Ejemplo: No analizar 'NoAnalizar'
+    }
 
-    # --- Columnas a Analizar (Asegúrate que coincidan EXACTAMENTE con tu CSV) ---
-    columns_to_analyze = ['EColi', 'SCerevisiae', 'Organism count']
-    results = {}
+    # 3. Conteo mínimo inicial para empezar el análisis de duplicación
+    min_count_for_analysis = 2
+    # --- FIN DE PARÁMETROS DE CONFIGURACIÓN ---
+
+
+    results = {} # Diccionario para almacenar los resultados detallados
 
     print(f"\n=== Iniciando Análisis de Tiempos de Duplicación ===")
-    print(f"Archivo: {args.filepath}")
-    print(f"Conteo mínimo inicial para análisis: {args.min_count}")
+    print(f"Archivo: {csv_filepath}")
+    print(f"Conteo mínimo inicial para análisis: {min_count_for_analysis}")
+    print("Tiempos de duplicación esperados (0 = no analizar):")
+    for org, time in target_doubling_times.items():
+        print(f"  - {org}: {time}")
 
-    for col_name in columns_to_analyze:
-        avg_dt, std_dt = calculate_doubling_time_for_column(args.filepath, col_name, args.min_count)
-        results[col_name] = {'average': avg_dt, 'std_dev': std_dt}
-        print("\n") # Añadir espacio entre análisis de columnas
+    # Iterar sobre los organismos definidos en target_doubling_times
+    for organism_name, target_dt in target_doubling_times.items():
+        if target_dt > 0: # Solo analizar si el tiempo esperado es mayor que 0
+            avg_dt, std_dt = calculate_doubling_time_for_column(csv_filepath, organism_name, min_count_for_analysis)
+            
+            error_percent = None
+            if avg_dt is not None and target_dt is not None and target_dt > 0:
+                # Calcular error relativo porcentual
+                error_percent = abs(avg_dt - target_dt) / target_dt * 100
 
-    print("=== Resumen de Resultados ===")
-    for col_name, data in results.items():
-        print(f"--- {col_name} ---")
-        if data['average'] is not None:
-            print(f"  Tiempo de duplicación promedio: {data['average']:.3f}")
-            print(f"  Desviación estándar: {data['std_dev']:.3f}")
+            results[organism_name] = {
+                'target': target_dt,
+                'average': avg_dt,
+                'std_dev': std_dt,
+                'error_percent': error_percent
+            }
+            print("\n") # Añadir espacio entre análisis de organismos
         else:
-            print("  No se pudo calcular el tiempo de duplicación.")
-        print("-" * (len(col_name) + 6))
+            print(f"\n--- Omitiendo análisis para '{organism_name}' (tiempo esperado = 0) ---\n")
 
-    print("============================")
+
+    # --- Generar la Tabla de Precisión Paramétrica ---
+    print("=" * 80)
+    print("=== Tabla de Precisión Paramétrica ===")
+    print("=" * 80)
+    # Encabezado de la tabla
+    header = f"{'Organismo':<20} | {'DT Esperado':<15} | {'DT Calculado (Avg)':<20} | {'Std Dev':<10} | {'Error (%)':<10}"
+    print(header)
+    print("-" * len(header))
+
+    # Filas de la tabla
+    for organism_name, data in results.items():
+        target_str = f"{data['target']:.2f}" if data['target'] is not None else "N/A"
+        avg_str = f"{data['average']:.3f}" if data['average'] is not None else "No calculado"
+        std_str = f"{data['std_dev']:.3f}" if data['std_dev'] is not None else "N/A"
+        err_str = f"{data['error_percent']:.2f}%" if data['error_percent'] is not None else "N/A"
+        
+        print(f"{organism_name:<20} | {target_str:<15} | {avg_str:<20} | {std_str:<10} | {err_str:<10}")
+
+    # Imprimir organismos omitidos (opcional, para confirmación)
+    omitted = [org for org, time in target_doubling_times.items() if time <= 0]
+    if omitted:
+        print("-" * len(header))
+        print(f"Organismos omitidos (DT Esperado = 0): {', '.join(omitted)}")
+
+    print("=" * 80)
