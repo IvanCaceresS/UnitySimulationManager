@@ -26,6 +26,7 @@ from typing import Union, Tuple, Dict
 import plistlib
 import numpy as np
 from scipy.optimize import curve_fit
+from sklearn.metrics import r2_score
 
 AuthenticationError_v0 = openai_error_v0.AuthenticationError
 InvalidRequestError_v0 = openai_error_v0.InvalidRequestError
@@ -581,12 +582,15 @@ def SimulationGraphics(simulation_name):
                             )
                             a_fit, b_fit = params
 
+                            organism_predicted = exponential_func(time_data_clean, a_fit, b_fit)
+                            r_squared = r2_score(organism_data_clean, organism_predicted)
+                            
                             # Generar puntos para la curva ajustada sobre el rango de tiempo limpio
                             time_fit = np.linspace(time_data_clean.min(), time_data_clean.max(), 100)
                             organism_fit = exponential_func(time_fit, a_fit, b_fit)
 
                             # --- 3. Plotear la curva ajustada ---
-                            label_fit = f"{col} (Exp: a={a_fit:.2f}, b={b_fit:.3f})"
+                            label_fit = f"{col} (Exp: a={a_fit:.2f}, b={b_fit:.3f}, R²={r_squared:.2f})" # Añadido R²
                             plt.plot(time_fit, organism_fit, label=label_fit, linestyle="--")
 
                         except RuntimeError:
