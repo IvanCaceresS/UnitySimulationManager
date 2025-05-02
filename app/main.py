@@ -49,7 +49,7 @@ OPENAI_API_KEY = None
 FINE_TUNED_MODEL_NAME = None
 SECONDARY_FINE_TUNED_MODEL_NAME = None
 UNITY_REQUIRED_VERSION_STRING = "6000.0.32f1" # Versión requerida
-SIMULATIONS_DIR = "./Simulations"
+SIMULATIONS_DIR = Path("./Simulations")
 SIMULATION_PROJECT_NAME = "Simulation"
 SIMULATION_PROJECT_PATH = None
 ASSETS_FOLDER = None
@@ -123,7 +123,7 @@ BTN_CLEARSEARCH_TEXT_COLOR = ("#FFFFFF", "#FFFFFF")
 
 
 # --- Constantes ---
-UNITY_PRODUCT_NAME = "InitialSetup"  # Nombre fijo del producto a buscar
+UNITY_PRODUCT_NAME = "InitialSetup"
 LOG_SUBFOLDER = "SimulationLoggerData"
 CSV_FILENAME = "SimulationStats.csv"
 GRAPHICS_SUBFOLDER = "Graphics"
@@ -537,7 +537,7 @@ def SimulationGraphics(simulation_name):
 
                     # Solo plotear si hay datos válidos después de limpiar NaNs
                     if len(time_data_clean) > 0:
-                        plt.plot(time_data_clean, organism_data_clean, label=f"{col} (Datos)", marker=".", linestyle="-", alpha=0.7)
+                        plt.plot(time_data_clean, organism_data_clean, label=f"{col}", marker=".", linestyle="-", alpha=0.7)
                         plotted_something = True
                         if col not in actual_organisms_plotted:
                             actual_organisms_plotted.append(col) # Añadir a la lista de ploteados
@@ -586,7 +586,7 @@ def SimulationGraphics(simulation_name):
                             organism_fit = exponential_func(time_fit, a_fit, b_fit)
 
                             # --- 3. Plotear la curva ajustada ---
-                            label_fit = f"{col} (Ajuste Exp: a={a_fit:.2f}, b={b_fit:.3f})"
+                            label_fit = f"{col} (Exp: a={a_fit:.2f}, b={b_fit:.3f})"
                             plt.plot(time_fit, organism_fit, label=label_fit, linestyle="--")
 
                         except RuntimeError:
@@ -1411,19 +1411,60 @@ def update_last_opened(sim_name):
     except Exception as e: print(f"[Err] update_last_opened({sim_name}): {e}")
 
 def read_last_loaded_simulation_name():
-    if SIMULATION_LOADED_FILE and os.path.exists(SIMULATION_LOADED_FILE):
+    """
+    Reads the name of the last loaded simulation from the state file.
+    Handles None, Path, or string input for SIMULATION_LOADED_FILE defensively.
+    Returns the simulation name (str) or None if not found/error.
+    """
+    global SIMULATION_LOADED_FILE # Access the global variable
+
+    file_path_obj = None
+
+    # --- Defensive Check and Conversion ---
+    current_value = SIMULATION_LOADED_FILE # Capture the value for checking
+    if isinstance(current_value, Path):
+        file_path_obj = current_value
+    elif isinstance(current_value, str) and current_value:
+        # Log a warning if it's unexpectedly a string, then try to convert
+        print(f"Warning: read_last_loaded_simulation_name received SIMULATION_LOADED_FILE as a string ('{current_value}'). Converting to Path.")
         try:
-            with open(SIMULATION_LOADED_FILE, "r") as f: return f.read().strip()
-        except Exception as e: print(f"Error reading {SIMULATION_LOADED_FILE}: {e}")
-    return None
+            file_path_obj = Path(current_value)
+        except Exception as e:
+            # Log error if conversion fails, cannot proceed
+            print(f"Error converting string '{current_value}' to Path in read_last_loaded_simulation_name: {e}")
+            return None
+    elif current_value is None:
+        # It's expected that it might be None initially or after deletion
+        pass # file_path_obj remains None
+    else:
+        # Log if it's some other unexpected type
+        print(f"Warning: read_last_loaded_simulation_name received SIMULATION_LOADED_FILE with unexpected type: {type(current_value)}")
+        return None
+    # --- End Defensive Check ---
+
+    # Proceed only if we have a valid Path object AND the file exists
+    if file_path_obj and file_path_obj.exists():
+        try:
+            # Use the confirmed Path object to open the file
+            with open(file_path_obj, "r", encoding="utf-8") as f:
+                content = f.read().strip()
+                # Return content only if it's not empty
+                return content if content else None
+        except Exception as e:
+            print(f"Error reading simulation name from {file_path_obj}: {e}")
+            return None # Return None on read error
+    else:
+        # Return None if path is None or file doesn't exist
+        # print(f"Debug: State file path is None or does not exist: {file_path_obj}") # Optional debug
+        return None
 
 def load_simulation(sim_name):
     global last_simulation_loaded, SIMULATION_PROJECT_PATH, ASSETS_FOLDER, STREAMING_ASSETS_FOLDER, SIMULATION_LOADED_FILE
     if not unity_projects_path_ok or not UNITY_PROJECTS_PATH: messagebox.showerror("Config Error", "Invalid Unity projects path."); return False
     SIMULATION_PROJECT_PATH = os.path.join(UNITY_PROJECTS_PATH, SIMULATION_PROJECT_NAME)
-    ASSETS_FOLDER = os.path.join(SIMULATION_PROJECT_PATH, "Assets")
-    STREAMING_ASSETS_FOLDER = os.path.join(ASSETS_FOLDER, "StreamingAssets")
-    SIMULATION_LOADED_FILE = os.path.join(STREAMING_ASSETS_FOLDER, "simulation_loaded.txt")
+    ASSETS_FOLDER = Path(SIMULATION_PROJECT_PATH) / "Assets"
+    STREAMING_ASSETS_FOLDER = ASSETS_FOLDER / "StreamingAssets"
+    SIMULATION_LOADED_FILE = STREAMING_ASSETS_FOLDER / "simulation_loaded.txt"
     src_path = os.path.join(SIMULATIONS_DIR, sim_name)
     if not os.path.isdir(src_path): messagebox.showerror("Error", f"Simulation '{sim_name}' not found."); return False
     try: os.makedirs(SIMULATION_PROJECT_PATH, exist_ok=True)
@@ -1462,11 +1503,14 @@ def delete_simulation(sim_name):
     """
     Elimina una simulación:
     1. Pide confirmación.
-    2. Elimina el archivo de estado si corresponde.
+    2. Elimina el archivo de estado si corresponde (handling type issues).
     3. Elimina el directorio de configuración/metadatos local (SIMULATIONS_DIR/sim_name).
     4. Elimina el directorio de datos de Unity (usando find_simulation_data_path).
     5. Actualiza las estructuras de datos internas y la UI.
     """
+    # Ensure access to necessary global variables
+    global last_simulation_loaded, all_simulations_data, SIMULATION_LOADED_FILE, SIMULATIONS_DIR
+
     if not sim_name:
         messagebox.showerror("Error", "No simulation name provided for deletion.")
         return
@@ -1484,33 +1528,83 @@ def delete_simulation(sim_name):
 
     if callable(globals().get('update_status')): update_status(f"Eliminando '{sim_name}'...")
     print(f"--- Iniciando eliminación de '{sim_name}' ---")
-    errs = False # Bandera para rastrear si ocurrió algún error
-    global last_simulation_loaded, all_simulations_data # Asegurar acceso si son globales
+    errs = False # Flag to track if any errors occurred
 
     # --- 2. Manejo del archivo de estado (Last Loaded) ---
-    # Asume que SIMULATION_LOADED_FILE es una variable global/constante de tipo Path
-    if 'SIMULATION_LOADED_FILE' in globals() and SIMULATION_LOADED_FILE.exists():
+    print(f"  Checking state file status for (current global value): {SIMULATION_LOADED_FILE}")
+
+    state_file_path_obj = None # Variable to hold the confirmed Path object
+
+    # --- Defensive Check and Conversion within delete_simulation ---
+    current_state_file_value = SIMULATION_LOADED_FILE # Get current global value
+    if isinstance(current_state_file_value, Path):
+        state_file_path_obj = current_state_file_value
+        # print(f"  Global SIMULATION_LOADED_FILE is already a Path object.") # Optional debug
+    elif isinstance(current_state_file_value, str) and current_state_file_value:
+        # Log a warning and try to convert if it's a string
+        print(f"  Warning: SIMULATION_LOADED_FILE is a string ('{current_state_file_value}') in delete_simulation. Converting to Path.")
         try:
-            # Asume que read_last_loaded_simulation_name() lee este archivo
-            loaded_name = read_last_loaded_simulation_name()
-            if loaded_name == sim_name:
-                SIMULATION_LOADED_FILE.unlink() # Elimina el archivo
-                print(f"  Archivo de estado '{SIMULATION_LOADED_FILE}' eliminado porque contenía '{sim_name}'.")
-                # Actualizar la variable global si coincide
-                if 'last_simulation_loaded' in globals() and last_simulation_loaded == sim_name:
-                    last_simulation_loaded = None
+            state_file_path_obj = Path(current_state_file_value)
         except Exception as e:
-            print(f"  Advertencia: No se pudo leer o eliminar el archivo de estado '{SIMULATION_LOADED_FILE}': {e}")
-            errs = True # Considerar esto un error leve
-    # Asegurar que la variable global se limpia incluso si el archivo no existía
-    elif 'last_simulation_loaded' in globals() and last_simulation_loaded == sim_name:
-         last_simulation_loaded = None
+            print(f"  Error converting state file string '{current_state_file_value}' to Path: {e}")
+            # Mark an error, as we can't safely check/delete the state file
+            errs = True
+    elif current_state_file_value is None:
+        # This is okay, means no state file path is currently set
+        # print(f"  Global SIMULATION_LOADED_FILE is None.") # Optional debug
+        pass # state_file_path_obj remains None
+    else:
+        # Log if it's some other unexpected type
+        print(f"  Warning: Global SIMULATION_LOADED_FILE has unexpected type: {type(current_state_file_value)}")
+        errs = True # Treat unexpected type as an error condition
+    # --- End Defensive Check ---
+
+    # Now, proceed only if we successfully obtained a Path object
+    if state_file_path_obj:
+        print(f"  Attempting operations on verified state file path: {state_file_path_obj}")
+        # Check if the file exists using the Path object
+        if state_file_path_obj.exists():
+            print(f"  State file exists on disk.")
+            try:
+                # Use the reliable read function (which should also handle Path/None)
+                loaded_name = read_last_loaded_simulation_name()
+                print(f"  Nombre de simulación cargada desde archivo: '{loaded_name}'")
+                # If it matches the simulation being deleted, remove the file
+                if loaded_name == sim_name:
+                    state_file_path_obj.unlink() # Use Path method unlink()
+                    print(f"  Archivo de estado '{state_file_path_obj}' eliminado porque contenía '{sim_name}'.")
+                    # Clear the global 'last_simulation_loaded' variable as well
+                    if 'last_simulation_loaded' in globals() and last_simulation_loaded == sim_name:
+                        last_simulation_loaded = None
+                        print("  Global 'last_simulation_loaded' cleared.")
+            except Exception as e:
+                # Catch errors during read/unlink
+                print(f"  Advertencia: No se pudo leer o eliminar el archivo de estado '{state_file_path_obj}': {e}")
+                errs = True
+        else:
+            # The file path was defined but the file doesn't exist on disk
+            print(f"  State file path defined but file not found at: {state_file_path_obj}")
+            # Still clear the global variable if it matches the one being deleted
+            if 'last_simulation_loaded' in globals() and last_simulation_loaded == sim_name:
+                 last_simulation_loaded = None
+                 print("  Global 'last_simulation_loaded' cleared (state file didn't exist).")
+    else:
+        # state_file_path_obj is None (either initially or due to conversion error)
+        print("  Skipping state file operations (Path object is None or invalid).")
+        # Still clear the global 'last_simulation_loaded' if it matches the sim being deleted
+        if 'last_simulation_loaded' in globals() and last_simulation_loaded == sim_name:
+             last_simulation_loaded = None
+             print("  Global 'last_simulation_loaded' cleared (state file path was None/invalid).")
+
 
     # --- 3. Eliminación del directorio de simulación LOCAL ---
-    # Este es el directorio que TÚ manejas, no el de Unity.
-    # Asume que SIMULATIONS_DIR es una variable global/constante de tipo Path
-    if 'SIMULATIONS_DIR' in globals():
-        sim_p = SIMULATIONS_DIR / sim_name # Construir ruta usando Pathlib
+    # This is the directory you manage, not Unity's.
+    # Assumes SIMULATIONS_DIR is a global/constant of type Path
+    print(f"  Intentando eliminar directorio de simulación local: {SIMULATIONS_DIR}")
+
+    # Add a check for SIMULATIONS_DIR type for robustness
+    if isinstance(SIMULATIONS_DIR, Path):
+        sim_p = SIMULATIONS_DIR / sim_name # Build Path using Pathlib operator
         print(f"  Intentando eliminar directorio de configuración local: {sim_p}")
         if sim_p.exists():
             if sim_p.is_dir():
@@ -1528,29 +1622,34 @@ def delete_simulation(sim_name):
                     traceback.print_exc()
                     errs = True
             else:
+                # Handle case where sim_p is unexpectedly a file
                 print(f"  Advertencia: Se esperaba un directorio en '{sim_p}', pero se encontró un archivo. Intentando eliminar archivo...")
                 try:
-                    sim_p.unlink() # Intentar borrar como archivo
+                    sim_p.unlink() # Attempt to delete as file
                 except Exception as e:
                      print(f"  Error al eliminar archivo inesperado en '{sim_p}': {e}")
                      errs = True
         else:
-            print(f"  Directorio de configuración local '{sim_p}' no encontrado (nada que eliminar).")
+             print(f"  Directorio de configuración local '{sim_p}' no encontrado (nada que eliminar).")
     else:
-        print("  Advertencia: La constante SIMULATIONS_DIR no está definida. Omitiendo eliminación de directorio local.")
+        # This is a critical configuration error
+        print(f"  CRITICAL ERROR: SIMULATIONS_DIR is not a Path object ({type(SIMULATIONS_DIR)}). Cannot delete local sim folder.")
+        if 'main_window' in globals() and main_window.winfo_exists(): # Check if GUI is available
+            messagebox.showerror("Internal Error", f"Configuration Error: SIMULATIONS_DIR type is {type(SIMULATIONS_DIR)}, expected Path.")
+        errs = True # Mark as error
 
 
     # --- 4. Eliminación del directorio de DATOS (Unity - persistentDataPath) ---
     print(f"  Intentando eliminar directorio de datos de Unity para '{sim_name}'...")
-    # ¡Usa la función auxiliar para encontrar la ruta correcta!
-    data_p = find_simulation_data_path(sim_name)
+    # Use the helper function to find the correct path!
+    data_p = find_simulation_data_path(sim_name) # Assumes this function returns Path or None
 
     if data_p is None:
-        # find_simulation_data_path ya imprimió un error detallado
+        # find_simulation_data_path should have already printed a detailed error
         print(f"  Error: No se pudo determinar la ruta del directorio de datos de Unity para '{sim_name}'. No se puede eliminar.")
-        # Podrías mostrar un messagebox aquí si lo consideras crítico
+        # Optionally show a message box if critical
         # messagebox.showwarning("Advertencia", f"No se pudo encontrar la carpeta de datos generada por Unity para '{sim_name}'. Puede que ya no existiera o hubo un problema al buscarla.")
-        errs = True # Marcar como error porque no se pudo completar la acción esperada
+        errs = True # Mark as error because the expected action couldn't be completed
     elif data_p.exists():
         if data_p.is_dir():
             try:
@@ -1567,41 +1666,47 @@ def delete_simulation(sim_name):
                 traceback.print_exc()
                 errs = True
         else:
-            # Esto sería raro si find_simulation_data_path funcionó, pero por seguridad...
+            # This would be unusual if find_simulation_data_path worked, but for safety...
             print(f"  Advertencia: Se esperaba un directorio en '{data_p}', pero se encontró un archivo. No se eliminará.")
             errs = True
     else:
         print(f"  Directorio de datos de Unity '{data_p}' no encontrado (nada que eliminar).")
 
     # --- 5. Actualizar estructura de datos interna ---
-    # Asume que all_simulations_data es una lista de diccionarios/objetos
+    # Assumes all_simulations_data is a list of dictionaries/objects
     if 'all_simulations_data' in globals():
         initial_count = len(all_simulations_data)
-        all_simulations_data = [s for s in all_simulations_data if isinstance(s, dict) and s.get('name') != sim_name]
+        # Filter out the simulation being deleted
+        all_simulations_data[:] = [s for s in all_simulations_data if isinstance(s, dict) and s.get('name') != sim_name]
         if len(all_simulations_data) < initial_count:
-             print(f"  Entrada para '{sim_name}' eliminada de la lista interna.")
+             print(f"  Entrada para '{sim_name}' eliminada de la lista interna 'all_simulations_data'.")
         else:
-             print(f"  Advertencia: No se encontró '{sim_name}' en la lista interna 'all_simulations_data'.")
+             print(f"  Advertencia: No se encontró '{sim_name}' en la lista interna 'all_simulations_data' para eliminar.")
 
     # --- 6. Actualización final de estado y UI ---
     print(f"--- Fin de eliminación de '{sim_name}' ---")
     final_message = f"Eliminación de '{sim_name}' completada"
     if errs:
         final_message += " con errores."
-        print("  Hubo errores durante el proceso de eliminación.")
+        print("  Hubo errores durante el proceso de eliminación. Revise los mensajes anteriores.")
     else:
         final_message += " exitosamente."
         print("  Eliminación completada sin errores reportados.")
 
-    if callable(globals().get('update_status')): update_status(final_message)
+    # Update status bar
+    if callable(globals().get('update_status')):
+        update_status(final_message)
 
-    # Llama a la función que refresca la lista de simulaciones en la UI
+    # Call the function that refreshes the simulation list in the UI
     if callable(globals().get('populate_simulations')):
         print("  Refrescando lista de simulaciones en la UI...")
-        populate_simulations()
+        # Run populate_simulations in the main thread if necessary (e.g., if delete is in a thread)
+        if 'main_window' in globals() and main_window.winfo_exists():
+             main_window.after(0, populate_simulations)
+        else:
+             populate_simulations() # Call directly if no GUI context or if already in main thread
     else:
         print("  Advertencia: Función 'populate_simulations' no encontrada para refrescar la UI.")
-
 
 # ======================================================
 # Unity Batch Execution & Progress Monitoring
