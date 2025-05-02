@@ -7,234 +7,248 @@ using System.Text;
 using System.Globalization;
 using System.Linq;
 
+/// <summary>
+/// Registra estadísticas de la simulación en un archivo CSV utilizando escritura por lotes (batching).
+/// NO registra datos nuevos mientras la simulación está pausada (GameStateManager.IsPaused == true).
+/// </summary>
 public class SimulationLogger : MonoBehaviour
 {
-    private const float LogInterval = 5f;             // Intervalo de 5 segundos para registrar datos
-    private const string CsvSeparator = ";";          // Separador de campos en el CSV
+    // --- Constantes ---
+    private const string CsvSeparator = ";";
     private const string CsvFileName = "SimulationStats.csv";
 
-    // Nombre de la simulación (se leerá de simulation_loaded.txt; si no existe, se usará "DefaultSimulation")
+    // --- Configuración del Batching/Buffering ---
+    private const int MaxBufferSize = 100;
+    private const float BatchWriteInterval = 1.0f; // Escribe al menos cada 1 segundo
+
+    // --- Variables ---
     [SerializeField]
     private string simulationName = "DefaultSimulation";
-
-    private float lastLogTime = 0f;
     private string logFilePath;
     private bool isLogging = false;
     private Left_GUI leftGui;
+    private List<string> logBuffer = new List<string>();
+    private float lastBatchWriteTime = 0f;
+
+    #region Unity Lifecycle Methods
 
     private void Start()
     {
-        // Intentar leer simulation_loaded.txt desde StreamingAssets
+        ReadSimulationNameFromFile();
+
+        leftGui = FindFirstObjectByType<Left_GUI>();
+        if (leftGui == null)
+        {
+            Debug.LogError("SimulationLogger: No se encontró Left_GUI. Logger desactivado.");
+            enabled = false;
+            return;
+        }
+
+        SetupLogFilePath();
+
+        if (!Application.isEditor)
+        {
+            StartCoroutine(WaitForOrganismNamesAndStartLogging());
+        }
+        else
+        {
+             Debug.Log("SimulationLogger: En modo Editor. Usa el botón 'Iniciar captación' para empezar.");
+        }
+    }
+
+    /// <summary>
+    /// Gestiona la adición de logs al buffer y la escritura a disco.
+    /// Ahora comprueba si la simulación está pausada antes de añadir nuevos datos.
+    /// </summary>
+    private void Update()
+    {
+        if (isLogging) // Solo procesar si el logging está activo
+        {
+            // --- ¡CAMBIO PRINCIPAL AQUÍ! ---
+            // Solo generar y añadir líneas al buffer si la simulación NO está pausada.
+            if (!GameStateManager.IsPaused) // <--- Añadida esta condición
+            {
+                // 1. Generar la línea de datos para el frame actual
+                string logLine = GenerateLogLine();
+
+                if (!string.IsNullOrEmpty(logLine))
+                {
+                    // 2. Añadirla al buffer en memoria (solo si no está pausado)
+                    logBuffer.Add(logLine);
+                }
+            }
+            // --- FIN DEL CAMBIO ---
+
+            // 3. Comprobar si se debe escribir el buffer a disco
+            //    Esto se hace independientemente de si está pausado, para asegurar que
+            //    los datos recolectados *antes* de pausar se guarden eventualmente.
+            if (logBuffer.Count >= MaxBufferSize || Time.time - lastBatchWriteTime >= BatchWriteInterval)
+            {
+                WriteBufferToFile();
+            }
+        }
+    }
+
+    // --- OnGUI (Sin cambios) ---
+    private void OnGUI()
+    {
+        if (Application.isEditor)
+        {
+            Rect buttonRect = new Rect(10, Screen.height - 50, 250, 40);
+            string buttonText = isLogging ? "Finalizar captación (Batch)" : "Iniciar captación (Batch)";
+
+            if (GUI.Button(buttonRect, buttonText))
+            {
+                if (isLogging) { StopLogging(); }
+                else
+                {
+                    if (leftGui != null && leftGui.enabled) { StartLogging(); }
+                    else { Debug.LogWarning("SimulationLogger: Left_GUI no listo."); }
+                }
+            }
+        }
+    }
+
+    // --- OnApplicationQuit (Sin cambios) ---
+    private void OnApplicationQuit()
+    {
+        if (isLogging)
+        {
+            Debug.Log("SimulationLogger: Cerrando aplicación, escribiendo buffer restante...");
+            WriteBufferToFile();
+        }
+    }
+
+    #endregion
+
+    #region Logging Control Methods
+
+    // --- WaitForOrganismNamesAndStartLogging (Sin cambios) ---
+    private IEnumerator WaitForOrganismNamesAndStartLogging()
+    {
+        Debug.Log("SimulationLogger: Esperando Left_GUI...");
+        while (leftGui == null || leftGui.validComponentTypes == null || !leftGui.validComponentTypes.Any())
+        {
+            yield return null;
+        }
+        Debug.Log($"SimulationLogger: Left_GUI listo. Iniciando logging automático.");
+        StartLogging();
+    }
+
+    // --- StartLogging (Sin cambios) ---
+    public void StartLogging()
+    {
+        if (isLogging) { Debug.LogWarning("SimulationLogger: Logging ya iniciado."); return; }
+        if (leftGui == null || !leftGui.enabled) { Debug.LogError("SimulationLogger: Left_GUI no disponible."); return; }
+
+        if (File.Exists(logFilePath))
+        {
+            try { File.Delete(logFilePath); Debug.Log($"SimulationLogger: Archivo anterior eliminado."); }
+            catch (Exception ex) { Debug.LogError($"SimulationLogger: Error eliminando archivo anterior: {ex.Message}"); }
+        }
+
+        isLogging = true;
+        logBuffer.Clear();
+        lastBatchWriteTime = Time.time;
+        WriteCSVHeader();
+        Debug.Log("SimulationLogger: Captación iniciada (modo Batch). No se registrará durante pausa.");
+    }
+
+    // --- StopLogging (Sin cambios) ---
+    public void StopLogging()
+    {
+         if (!isLogging) { Debug.LogWarning("SimulationLogger: Logging ya detenido."); return; }
+        isLogging = false;
+        WriteBufferToFile(); // Escribe datos restantes
+        Debug.Log($"SimulationLogger: Captación finalizada. Archivo: {logFilePath}");
+    }
+
+    #endregion
+
+    #region Data Handling and File IO
+
+    // --- ReadSimulationNameFromFile (Sin cambios) ---
+     private void ReadSimulationNameFromFile()
+    {
         string simulationLoadedFile = Path.Combine(Application.streamingAssetsPath, "simulation_loaded.txt");
-        Debug.Log($"SimulationLogger: Leyendo {simulationLoadedFile}...");
+        Debug.Log($"SimulationLogger: Buscando nombre simulación en: {simulationLoadedFile}");
         if (File.Exists(simulationLoadedFile))
         {
             try
             {
                 string loadedName = File.ReadAllText(simulationLoadedFile).Trim();
-                if (!string.IsNullOrEmpty(loadedName))
-                {
-                    simulationName = loadedName;
-                    Debug.Log($"SimulationLogger: Nombre de simulación actualizado a: {simulationName}");
-                }
-                else
-                {
-                    simulationName = "DefaultSimulation";
-                    Debug.LogWarning("SimulationLogger: El archivo simulation_loaded.txt está vacío. Usando 'DefaultSimulation'.");
-                }
+                if (!string.IsNullOrEmpty(loadedName)) { simulationName = loadedName; Debug.Log($"SimulationLogger: Nombre simulación cargado: {simulationName}"); }
+                else { Debug.LogWarning("SimulationLogger: simulation_loaded.txt vacío. Usando 'DefaultSimulation'."); simulationName = "DefaultSimulation"; }
             }
-            catch (Exception ex)
-            {
-                Debug.LogError("SimulationLogger: Error al leer simulation_loaded.txt: " + ex.Message);
-                simulationName = "DefaultSimulation";
-            }
+            catch (Exception ex) { Debug.LogError($"SimulationLogger: Error leyendo simulation_loaded.txt: {ex.Message}. Usando 'DefaultSimulation'."); simulationName = "DefaultSimulation"; }
         }
-        else
-        {
-            simulationName = "DefaultSimulation";
-            Debug.LogWarning("SimulationLogger: No se encontró simulation_loaded.txt en StreamingAssets. Usando 'DefaultSimulation'.");
-        }
-
-        // Buscar el Left_GUI en la escena
-        leftGui = FindFirstObjectByType<Left_GUI>();
-        if (leftGui == null)
-        {
-            Debug.LogError("SimulationLogger: No se encontró Left_GUI en la escena.");
-            enabled = false;
-            return;
-        }
-
-        // Utilizar la carpeta "My Documents" para almacenar los resultados.
-        string documentsPath = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
-        string folderPath = Path.Combine(documentsPath, "SimulationLoggerData", simulationName);
-        if (!Directory.Exists(folderPath))
-        {
-            try
-            {
-                Directory.CreateDirectory(folderPath);
-            }
-            catch (Exception ex)
-            {
-                Debug.LogError($"SimulationLogger: Error al crear la carpeta '{folderPath}': {ex.Message}");
-                enabled = false;
-                return;
-            }
-        }
-
-        logFilePath = Path.Combine(folderPath, CsvFileName);
-        Debug.Log($"SimulationLogger: El CSV se almacenará en: {logFilePath}");
-
-        // En build, esperar a que Left_GUI tenga los nombres reales de los organismos antes de iniciar la captura.
-        if (!Application.isEditor)
-        {
-            StartCoroutine(WaitForOrganismNamesAndStartLogging());
-        }
+        else { Debug.LogWarning("SimulationLogger: No se encontró simulation_loaded.txt. Usando 'DefaultSimulation'."); simulationName = "DefaultSimulation"; }
     }
 
-    // En editor se permite iniciar/detener mediante botón
-    private void OnGUI()
+    // --- SetupLogFilePath (Sin cambios) ---
+    private void SetupLogFilePath()
     {
-        if (Application.isEditor)
+        try
         {
-            string buttonText = isLogging ? "Finalizar captación de estadísticas" : "Iniciar captación de estadísticas";
-            if (GUI.Button(new Rect(10, Screen.height - 50, 250, 40), buttonText))
-            {
-                if (isLogging)
-                    StopLogging();
-                else
-                    StartLogging();
-            }
+            string documentsPath = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+            string folderPath = Path.Combine(documentsPath, "SimulationLoggerData", simulationName);
+            if (!Directory.Exists(folderPath)) { Directory.CreateDirectory(folderPath); Debug.Log($"SimulationLogger: Carpeta logs creada: {folderPath}"); }
+            logFilePath = Path.Combine(folderPath, CsvFileName);
+            Debug.Log($"SimulationLogger: Archivo CSV: {logFilePath}");
         }
+        catch (Exception ex) { Debug.LogError($"SimulationLogger: Error crítico configurando ruta logs: {ex.Message}. Logger desactivado."); enabled = false; }
     }
 
-    private void Update()
+    // --- GenerateLogLine (Sin cambios) ---
+    private string GenerateLogLine()
     {
-        if (isLogging && Time.time - lastLogTime >= LogInterval)
-        {
-            lastLogTime = Time.time;
-            LogAllData();
-        }
-    }
-
-    /// <summary>
-    /// Espera hasta que leftGui.OrganismNames contenga al menos un nombre real
-    /// (es decir, un nombre distinto a un valor marcador como "Cantidad de organismos").
-    /// </summary>
-    private IEnumerator WaitForOrganismNamesAndStartLogging()
-    {
-        Debug.Log("SimulationLogger: Esperando a que Left_GUI cachee los tipos de organismos...");
-        // Espera indefinidamente hasta que leftGui no sea nulo
-        // y la lista validComponentTypes (la fuente real de nombres específicos) contenga al menos un elemento.
-        while (leftGui == null || leftGui.validComponentTypes == null || !leftGui.validComponentTypes.Any()) // <-- Condición Cambiada
-        {
-            // Opcional: Añadir un pequeño delay para no consumir 100% CPU en el bucle while si algo va mal
-            // yield return new WaitForSeconds(0.1f);
-            yield return null; // Espera al siguiente frame
-        }
-        Debug.Log($"SimulationLogger: Left_GUI tiene {leftGui.validComponentTypes.Count} tipos de organismos. Iniciando logging.");
-        StartLogging();
-    }
-
-    /// <summary>
-    /// Inicia la captura de datos: elimina el archivo CSV anterior (si existe) y escribe el encabezado.
-    /// </summary>
-    private void StartLogging()
-    {
-        if (File.Exists(logFilePath))
-        {
-            try
-            {
-                File.Delete(logFilePath);
-            }
-            catch (Exception ex)
-            {
-                Debug.LogError($"SimulationLogger: Error al eliminar el archivo anterior: {ex.Message}");
-            }
-        }
-        isLogging = true;
-        lastLogTime = Time.time;
-        WriteCSVHeader();
-        Debug.Log("SimulationLogger: Captación de estadísticas iniciada.");
-    }
-
-    /// <summary>
-    /// Detiene la captura de datos.
-    /// </summary>
-    private void StopLogging()
-    {
-        isLogging = false;
-        Debug.Log($"SimulationLogger: Captación de estadísticas finalizada. Archivo guardado en: {logFilePath}");
-    }
-
-    /// <summary>
-    /// Registra en una línea los datos actuales de la simulación y el conteo de organismos.
-    /// </summary>
-    private void LogAllData()
-    {
-        if (leftGui == null || !isLogging)
-            return;
+        if (leftGui == null || leftGui.entityCounts == null || leftGui.OrganismNames == null) { return null; }
 
         StringBuilder csvLine = new StringBuilder();
-        csvLine.Append(DateTime.Now.ToString("dd-MM-yyyy HH:mm:ss", CultureInfo.InvariantCulture));
-        csvLine.Append(CsvSeparator);
-        csvLine.Append(leftGui.cachedFPS.ToString("F2", CultureInfo.InvariantCulture)).Append(CsvSeparator);
-        csvLine.Append(leftGui.cachedRealTime.ToString("F2", CultureInfo.InvariantCulture)).Append(CsvSeparator);
-        csvLine.Append(leftGui.cachedSimulatedTime.ToString("F2", CultureInfo.InvariantCulture)).Append(CsvSeparator);
-        csvLine.Append(GameStateManager.DeltaTime.ToString("F2", CultureInfo.InvariantCulture)).Append(CsvSeparator);
-        csvLine.Append(leftGui.cachedFrameCount.ToString(CultureInfo.InvariantCulture)).Append(CsvSeparator);
-        csvLine.Append(GameStateManager.IsPaused ? "Sí" : "No");
+        string timestamp = DateTime.Now.ToString("dd-MM-yyyy HH:mm:ss", CultureInfo.InvariantCulture);
+        csvLine.Append(timestamp);
+        csvLine.Append(CsvSeparator).Append(leftGui.cachedFPS.ToString("F2", CultureInfo.InvariantCulture));
+        csvLine.Append(CsvSeparator).Append(leftGui.cachedRealTime.ToString("F2", CultureInfo.InvariantCulture));
+        csvLine.Append(CsvSeparator).Append(leftGui.cachedSimulatedTime.ToString("F2", CultureInfo.InvariantCulture));
+        csvLine.Append(CsvSeparator).Append(GameStateManager.DeltaTime.ToString("F4", CultureInfo.InvariantCulture));
+        csvLine.Append(CsvSeparator).Append(leftGui.cachedFrameCount.ToString(CultureInfo.InvariantCulture));
+        csvLine.Append(CsvSeparator).Append(GameStateManager.IsPaused ? "Sí" : "No"); // Se sigue registrando el estado "Pausado"
 
-        if (leftGui.OrganismNames != null)
+        foreach (var orgName in leftGui.OrganismNames)
         {
-            foreach (var orgName in leftGui.OrganismNames)
-            {
-                int count = 0;
-                if (leftGui.entityCounts != null && leftGui.entityCounts.TryGetValue(orgName, out count))
-                {
-                    // Se obtiene el conteo correcto.
-                }
-                csvLine.Append(CsvSeparator).Append(count.ToString(CultureInfo.InvariantCulture));
-            }
+            leftGui.entityCounts.TryGetValue(orgName, out int count);
+            csvLine.Append(CsvSeparator).Append(count.ToString(CultureInfo.InvariantCulture));
         }
-        csvLine.AppendLine();
+        return csvLine.ToString();
+    }
+
+    // --- WriteBufferToFile (Sin cambios) ---
+    private void WriteBufferToFile()
+    {
+        if (logBuffer == null || logBuffer.Count == 0) { return; }
 
         try
         {
-            File.AppendAllText(logFilePath, csvLine.ToString());
+            string batchContent = string.Join(Environment.NewLine, logBuffer) + Environment.NewLine;
+            File.AppendAllText(logFilePath, batchContent);
+            logBuffer.Clear();
+            lastBatchWriteTime = Time.time;
         }
-        catch (Exception ex)
-        {
-            Debug.LogError($"SimulationLogger: Error al escribir en el CSV: {ex.Message}");
-        }
+        catch (IOException ioEx) { Debug.LogError($"SimulationLogger: Error IO escribiendo buffer: {ioEx.Message}"); }
+        catch (Exception ex) { Debug.LogError($"SimulationLogger: Error general escribiendo buffer: {ex.Message}"); }
     }
 
-    /// <summary>
-    /// Escribe el encabezado del CSV con los nombres de las columnas.
-    /// </summary>
+    // --- WriteCSVHeader (Sin cambios) ---
     private void WriteCSVHeader()
     {
-        List<string> headers = new List<string>
-        {
-            "Timestamp",
-            "FPS",
-            "RealTime",
-            "SimulatedTime",
-            "DeltaTime",
-            "FrameCount",
-            "Pausado"
-        };
-
-        if (leftGui != null && leftGui.OrganismNames != null && leftGui.OrganismNames.Any())
-            headers.AddRange(leftGui.OrganismNames);
-
+         if (leftGui == null) { Debug.LogError("SimulationLogger: No se puede escribir encabezado, Left_GUI nulo."); return; }
+        List<string> headers = new List<string> { "Timestamp", "FPS", "RealTime", "SimulatedTime", "DeltaTime", "FrameCount", "Pausado" };
+        if (leftGui.OrganismNames != null) { headers.AddRange(leftGui.OrganismNames); }
+        else { Debug.LogWarning("SimulationLogger: Left_GUI.OrganismNames nulo al escribir encabezado."); }
         string headerLine = string.Join(CsvSeparator, headers) + Environment.NewLine;
-        try
-        {
-            File.AppendAllText(logFilePath, headerLine);
-        }
-        catch (Exception ex)
-        {
-            Debug.LogError($"SimulationLogger: Error al escribir el encabezado en el CSV: {ex.Message}");
-        }
+        try { File.AppendAllText(logFilePath, headerLine); } // Append porque StartLogging ya borró el archivo
+        catch (Exception ex) { Debug.LogError($"SimulationLogger: Error escribiendo encabezado: {ex.Message}"); }
     }
+
+    #endregion
 }

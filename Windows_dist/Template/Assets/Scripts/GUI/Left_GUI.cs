@@ -25,9 +25,9 @@ public class Left_GUI : MonoBehaviour
     public int cachedFrameCount = 0;
     private bool hasStartedSimulation = false;
 
-    // Intervalo para actualizar el conteo de entidades
-    private const float entityCountUpdateInterval = 2.0f;
-    private float lastEntityCountUpdateTime = 0f;
+    // Intervalo para actualizar el conteo de entidades (YA NO SE USA)
+    // private const float entityCountUpdateInterval = 2.0f; // Eliminado
+    // private float lastEntityCountUpdateTime = 0f; // Eliminado
 
     // Conteo de entidades y tipos
     public Dictionary<string, int> entityCounts = new Dictionary<string, int>();
@@ -64,7 +64,6 @@ public class Left_GUI : MonoBehaviour
         // Dispose queries on destroy
         foreach(var query in entityQueries.Values)
         {
-            // Dispose directly, no need to check IsCreated
             query.Dispose();
         }
         entityQueries.Clear();
@@ -79,6 +78,7 @@ public class Left_GUI : MonoBehaviour
 
     void Update()
     {
+        // --- Cálculo de FPS (sin cambios) ---
         if (Time.unscaledDeltaTime > Mathf.Epsilon)
         {
             cachedFPS = 1f / Time.unscaledDeltaTime;
@@ -92,17 +92,24 @@ public class Left_GUI : MonoBehaviour
         {
             if (!GameStateManager.IsPaused)
             {
+                // --- Actualización de tiempos (sin cambios) ---
                 accumulatedRealTime += Time.deltaTime;
                 cachedRealTime = accumulatedRealTime;
-
                 cachedFrameCount++;
                 cachedSimulatedTime = cachedFrameCount * GameStateManager.DeltaTime;
 
-                if (Time.realtimeSinceStartup - lastEntityCountUpdateTime >= entityCountUpdateInterval)
-                {
-                    UpdateEntityCounts();
-                    lastEntityCountUpdateTime = Time.realtimeSinceStartup;
-                }
+                // --- ACTUALIZACIÓN DEL CONTEO DE ENTIDADES POR FRAME ---
+                // Se llama a UpdateEntityCounts() en cada frame si no está pausado.
+                UpdateEntityCounts();
+                // --------------------------------------------------------
+
+                // --- Bloque del intervalo de tiempo eliminado ---
+                // if (Time.realtimeSinceStartup - lastEntityCountUpdateTime >= entityCountUpdateInterval)
+                // {
+                //     // UpdateEntityCounts(); // Movido fuera del if
+                //     // lastEntityCountUpdateTime = Time.realtimeSinceStartup; // Eliminado
+                // }
+                // --------------------------------------------------
             }
         }
         else
@@ -121,8 +128,8 @@ public class Left_GUI : MonoBehaviour
         cachedFrameCount = 0;
         cachedSimulatedTime = 0f;
         entityCounts.Clear();
-        lastEntityCountUpdateTime = Time.realtimeSinceStartup;
-        UpdateEntityCounts();
+        // lastEntityCountUpdateTime = Time.realtimeSinceStartup; // Eliminado
+        UpdateEntityCounts(); // Llama una vez al inicio
     }
 
     public void ResetSimulation()
@@ -140,9 +147,10 @@ public class Left_GUI : MonoBehaviour
         cachedFPS = 0f;
         cachedFrameCount = 0;
         entityCounts.Clear();
-        lastEntityCountUpdateTime = Time.realtimeSinceStartup;
+        // lastEntityCountUpdateTime = Time.realtimeSinceStartup; // Eliminado
     }
 
+    // --- UpdateEntityCounts() sin cambios en su lógica interna ---
     private void UpdateEntityCounts()
     {
         // Check World validity first
@@ -161,9 +169,6 @@ public class Left_GUI : MonoBehaviour
 
         foreach (var kvp in entityQueries)
         {
-            // Removed the invalid 'IsCreated' check here.
-            // Rely on the World check above and the try-catch below.
-
             try
             {
                 // Calculate count - this might throw if the query became invalid due to structural changes.
@@ -186,7 +191,7 @@ public class Left_GUI : MonoBehaviour
         entityCounts = currentCounts;
     }
 
-
+    // --- CacheValidComponentTypes() sin cambios ---
     private void CacheValidComponentTypes()
     {
         if (World.DefaultGameObjectInjectionWorld == null || !World.DefaultGameObjectInjectionWorld.IsCreated)
@@ -200,12 +205,10 @@ public class Left_GUI : MonoBehaviour
         // Dispose existing queries before clearing
         foreach(var query in entityQueries.Values)
         {
-            // Removed the invalid 'IsCreated' check. Dispose directly.
             query.Dispose();
         }
         entityQueries.Clear();
         validComponentTypes.Clear(); // Clear the type list as well
-
 
         try
         {
@@ -230,7 +233,7 @@ public class Left_GUI : MonoBehaviour
          Debug.Log($"Left_GUI: Finished caching component types. Found {validComponentTypes.Count} valid types.");
     }
 
-
+    // --- OnGUI() sin cambios ---
     void OnGUI()
     {
         if (labelStyle == null)
@@ -248,34 +251,66 @@ public class Left_GUI : MonoBehaviour
         DisplaySimulationStats();
     }
 
+    // --- DisplaySimulationStats() sin cambios ---
     private void DisplaySimulationStats()
+{
+    int y = GUIYPosition + 5; // Posición inicial Y
+
+    // --- Sección de estadísticas de simulación (sin cambios) ---
+    GUI.Label(new Rect(GUIXPosition, y, GUIWidth, GUIHeight), $"FPS: {cachedFPS:F1}", labelStyle); y += GUIHeight;
+    GUI.Label(new Rect(GUIXPosition, y, GUIWidth, GUIHeight), $"Real Time: {FormatTime(cachedRealTime)}", labelStyle); y += GUIHeight;
+    GUI.Label(new Rect(GUIXPosition, y, GUIWidth, GUIHeight), $"Simulated Time: {FormatTime(cachedSimulatedTime)}", labelStyle); y += GUIHeight;
+
+    float timeMultiplier = GameStateManager.DeltaTime * 60f; // Asumiendo 60 FPS como base para el multiplicador? O debería ser 1/DeltaTime? Revisar lógica si es necesario.
+    string multiplierText = hasStartedSimulation ? $"{timeMultiplier:F2}x" : "N/A";
+    // Corrección: El multiplicador de tiempo generalmente se define externamente o como la relación entre tiempo simulado y tiempo real.
+    // Si DeltaTime es el paso de tiempo fijo de la simulación, el multiplicador podría ser GameStateManager.TimeMultiplier si existe, o calculado de otra forma.
+    // Usaremos el cálculo anterior por ahora, pero tenlo en cuenta.
+    GUI.Label(new Rect(GUIXPosition, y, GUIWidth, GUIHeight), $"Time Multiplier: {multiplierText}", labelStyle); y += GUIHeight; // Considerar usar GameStateManager.TimeMultiplier si existe
+
+    GUI.Label(new Rect(GUIXPosition, y, GUIWidth, GUIHeight), $"DeltaTime: {GameStateManager.DeltaTime:F4}", labelStyle); y += GUIHeight;
+    GUI.Label(new Rect(GUIXPosition, y, GUIWidth, GUIHeight), $"Elapsed Frames: {cachedFrameCount}", labelStyle); y += GUIHeight;
+    GUI.Label(new Rect(GUIXPosition, y, GUIWidth, GUIHeight), $"Paused: {(GameStateManager.IsPaused ? "Yes" : "No")}", labelStyle); y += GUIHeight;
+
+    y += 5; // Espacio
+    GUI.Label(new Rect(GUIXPosition, y, GUIWidth, GUIHeight), "--- Entities ---", labelStyle); y += GUIHeight;
+
+    // --- Nueva lógica para ordenar y mostrar entidades ---
+
+    // 1. Intentar obtener la entrada "Organism count"
+    KeyValuePair<string, int> organismCountEntry = default;
+    bool hasOrganismCount = false;
+    if (entityCounts.TryGetValue("Organism count", out int totalCount))
     {
-        int y = GUIYPosition + 5;
-
-        GUI.Label(new Rect(GUIXPosition, y, GUIWidth, GUIHeight), $"FPS: {cachedFPS:F1}", labelStyle); y += GUIHeight;
-        GUI.Label(new Rect(GUIXPosition, y, GUIWidth, GUIHeight), $"Real Time: {FormatTime(cachedRealTime)}", labelStyle); y += GUIHeight;
-        GUI.Label(new Rect(GUIXPosition, y, GUIWidth, GUIHeight), $"Simulated Time: {FormatTime(cachedSimulatedTime)}", labelStyle); y += GUIHeight;
-
-        float timeMultiplier = GameStateManager.DeltaTime * 60f;
-        string multiplierText = hasStartedSimulation ? $"{timeMultiplier:F2}x" : "N/A";
-        GUI.Label(new Rect(GUIXPosition, y, GUIWidth, GUIHeight), $"Time Multiplier: {multiplierText}", labelStyle); y += GUIHeight;
-
-        GUI.Label(new Rect(GUIXPosition, y, GUIWidth, GUIHeight), $"DeltaTime: {GameStateManager.DeltaTime:F4}", labelStyle); y += GUIHeight;
-        GUI.Label(new Rect(GUIXPosition, y, GUIWidth, GUIHeight), $"Elapsed Frames: {cachedFrameCount}", labelStyle); y += GUIHeight;
-        GUI.Label(new Rect(GUIXPosition, y, GUIWidth, GUIHeight), $"Paused: {(GameStateManager.IsPaused ? "Yes" : "No")}", labelStyle); y += GUIHeight;
-
-        y += 5;
-        GUI.Label(new Rect(GUIXPosition, y, GUIWidth, GUIHeight), "--- Entities ---", labelStyle); y += GUIHeight;
-
-        var sortedEntityCounts = entityCounts.ToList();
-        sortedEntityCounts.Sort((pair1, pair2) => pair1.Key.CompareTo(pair2.Key));
-
-        foreach (var entry in sortedEntityCounts)
-        {
-            GUI.Label(new Rect(GUIXPosition, y, GUIWidth, GUIHeight), $"{entry.Key}: {entry.Value}", labelStyle); y += GUIHeight;
-        }
+        organismCountEntry = new KeyValuePair<string, int>("Organism count", totalCount);
+        hasOrganismCount = true;
     }
 
+    // 2. Crear una lista solo con los organismos específicos (excluyendo "Organism count")
+    List<KeyValuePair<string, int>> specificOrganisms = entityCounts
+        .Where(pair => pair.Key != "Organism count")
+        .ToList();
+
+    // 3. Ordenar la lista de organismos específicos alfabéticamente
+    specificOrganisms.Sort((pair1, pair2) => pair1.Key.CompareTo(pair2.Key));
+
+    // 4. Mostrar los organismos específicos ordenados
+    foreach (var entry in specificOrganisms)
+    {
+        GUI.Label(new Rect(GUIXPosition, y, GUIWidth, GUIHeight), $"{entry.Key}: {entry.Value}", labelStyle);
+        y += GUIHeight;
+    }
+
+    // 5. Mostrar "Organism count" al final, si existe
+    if (hasOrganismCount)
+    {
+        GUI.Label(new Rect(GUIXPosition, y, GUIWidth, GUIHeight), $"{organismCountEntry.Key}: {organismCountEntry.Value}", labelStyle);
+        y += GUIHeight; // Asegúrate de incrementar 'y' también aquí
+    }
+    // --- Fin de la nueva lógica ---
+}
+
+    // --- FormatTime() sin cambios ---
     private string FormatTime(float timeInSeconds)
     {
         TimeSpan t = TimeSpan.FromSeconds(timeInSeconds);
