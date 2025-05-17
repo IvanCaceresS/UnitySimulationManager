@@ -12,3 +12,11 @@
 - chmod +x ./Mac_build.sh
 - Run ./Mac_build.sh to build the app
 - The SimulationManager.app can be found in the ./Mac_dist folder
+- The SimulationManagerLauncher Alias can be found in the ./Mac_dist folder
+
+# RUN - WINDOWS
+- Open SimulationManager.exe
+
+# RUN - MAC
+- Open SimulationManagerLauncher
+- Go to "Privacy & Security" in System Settings and allow "SimulationManagerLauncher" to open, as it may be blocked by default due to being identified as potentially unsafe.

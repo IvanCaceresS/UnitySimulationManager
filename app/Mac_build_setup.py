@@ -48,7 +48,6 @@ OPTIONS = {
     }
 }
 
-# --- Setup Configuration ---
 setup(
     app=[MAIN_SCRIPT],
     name=APP_NAME,
@@ -57,7 +56,6 @@ setup(
     setup_requires=['py2app'],
 )
 
-# --- Post-setup Check (Optional) ---
 if not os.path.exists(ICON_MAC) and OPTIONS.get('iconfile'):
     print(f"WARNING: Icon file '{ICON_MAC}' specified but not found. Build will lack an icon.")
 elif not OPTIONS.get('iconfile'):
