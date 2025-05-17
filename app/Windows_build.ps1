@@ -11,7 +11,7 @@ $RequiredPythonVersion = '3.9.11'
 
 $VenvDirName = ".venv"
 $RequirementsFileName = "windows_requirements.txt"
-$MainScriptName = "main.py"
+$MainScriptName = "Windows_main.py"
 $BuildName = "SimulationManager"
 $IconWinRelPath = "img\icono.ico"
 $ItemsToCopyRel = @(".env", "img", "Template")

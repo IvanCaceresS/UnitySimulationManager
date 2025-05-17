@@ -1,13 +1,4 @@
-#!/bin/bash
-
-# Mac_build.sh
-# Builds the macOS application using py2app and copies necessary data files alongside.
-
-# Exit immediately if a command exits with a non-zero status.
 set -e
-# Treat unset variables as an error when substituting.
-# set -u # Uncomment if you want stricter variable checks
-# Prevent errors in pipelines from being masked.
 set -o pipefail
 
 # --- Configuration ---
