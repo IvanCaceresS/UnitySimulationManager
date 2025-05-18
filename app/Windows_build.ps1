@@ -10,7 +10,7 @@ Write-Host "Script directory: $ScriptDir" -ForegroundColor Cyan
 $RequiredPythonVersion = '3.9.11'
 
 $VenvDirName = ".venv"
-$RequirementsFileName = "windows_requirements.txt"
+$RequirementsFileName = "Windows_requirements.txt"
 $MainScriptName = "Windows_main.py"
 $BuildName = "SimulationManager"
 $IconWinRelPath = "img\icono.ico"
