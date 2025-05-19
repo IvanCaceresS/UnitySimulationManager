@@ -78,10 +78,10 @@ fi
 
 #region 2 Verify Python Installation and Version
 log_step "2 Verifying Python 3 installation and version"
-if ! command -v python3 &> /dev/null; then
+if ! command -v python3.9 &> /dev/null; then
     log_error_exit "Python 3 is not installed or not found in PATH. Please install Python $REQUIRED_PYTHON_VERSION."
 fi
-PYTHON_PATH=$(command -v python3)
+PYTHON_PATH=$(command -v python3.9)
 echo "Python 3 executable found: $PYTHON_PATH"
 
 echo "Checking Python version..."
