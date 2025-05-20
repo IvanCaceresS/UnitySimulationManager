@@ -13,7 +13,7 @@ public class Right_GUI : MonoBehaviour
     private int[] fpsLevels = { 60, 144, 500, 1000, -1 };
     private int currentFPSIndex = 0;
     private string initialSceneName;
-    private static float LowSpeedMultiplierLimit = 1.0
+    private static float LowSpeedMultiplierLimit = 1.0f;
     private static float HighSpeedMultiplierLimit = 2400f;
     private string speedMultiplierInput = "1.00";
     private int baseFontSize = 12;
