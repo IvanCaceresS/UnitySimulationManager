@@ -42,6 +42,7 @@ To get the `FINE_TUNED_MODEL_NAME` and `2ND_FINE_TUNED_MODEL_NAME`, you need to 
     * `EPOCHS`: 10
     * `BATCH_SIZE`: 1
     * `LEARNING_RATE_MULTIPLIER`: 1.8
+    * `Seed`: 1875054926
 * **Approximate Training Cost:** $0.7854 USD
 
 ### Model 2: `2ND_FINE_TUNED_MODEL_NAME`
@@ -51,6 +52,7 @@ To get the `FINE_TUNED_MODEL_NAME` and `2ND_FINE_TUNED_MODEL_NAME`, you need to 
     * `EPOCHS`: 4
     * `BATCH_SIZE`: 1
     * `LEARNING_RATE_MULTIPLIER`: 1.8
+    * `Seed`: 2066556991
 * **Approximate Training Cost:** $0.0903 USD
 
 After initiating the fine-tuning jobs via the OpenAI API or platform, you will receive unique model identifiers for each. Use these identifiers for `FINE_TUNED_MODEL_NAME` and `2ND_FINE_TUNED_MODEL_NAME` in your `.env` file.
